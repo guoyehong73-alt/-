@@ -1,0 +1,143 @@
+/*********************************************************************************************************************
+* TC264 Opensourec Library 即（TC264 开源库）是一个基于官方 SDK 接口的第三方开源库
+* Copyright (c) 2022 SEEKFREE 逐飞科技
+*
+* 本文件是 TC264 开源库的一部分
+*
+* TC264 开源库 是免费软件
+* 您可以根据自由软件基金会发布的 GPL（GNU General Public License，即 GNU通用公共许可证）的条款
+* 即 GPL 的第3版（即 GPL3.0）或（您选择的）任何后来的版本，重新发布和/或修改它
+*
+* 本开源库的发布是希望它能发挥作用，但并未对其作任何的保证
+* 甚至没有隐含的适销性或适合特定用途的保证
+* 更多细节请参见 GPL
+*
+* 您应该在收到本开源库的同时收到一份 GPL 的副本
+* 如果没有，请参阅<https://www.gnu.org/licenses/>
+*
+* 额外注明：
+* 本开源库使用 GPL3.0 开源许可证协议 以上许可申明为译文版本
+* 许可申明英文版在 libraries/doc 文件夹下的 GPL3_permission_statement.txt 文件中
+* 许可证副本在 libraries 文件夹下 即该文件夹下的 LICENSE 文件
+* 欢迎各位使用并传播本程序 但修改内容时必须保留逐飞科技的版权声明（即本声明）
+*
+* 文件名称          cpu0_main
+* 公司名称          成都逐飞科技有限公司
+* 版本信息          查看 libraries/doc 文件夹内 version 文件 版本说明
+* 开发环境          ADS v1.10.2
+* 适用平台          TC264D
+* 店铺链接          https://seekfree.taobao.com/
+*
+* 修改记录
+* 日期              作者                备注
+* 2022-09-15       pudding            first version
+********************************************************************************************************************/
+#include "zf_common_headfile.h"
+
+#pragma section all "cpu0_dsram"
+// 将本语句与#pragma section all restore语句之间的全局变量都放在CPU0的RAM中
+
+// 本例程是开源库空工程 可用作移植或者测试各类内外设
+// 本例程是开源库空工程 可用作移植或者测试各类内外设
+// 本例程是开源库空工程 可用作移植或者测试各类内外设
+
+// **************************** 代码区域 ****************************
+int core0_main(void)
+{
+    clock_init();                   // 获取时钟频率<务必保留>
+    debug_init();                   // 初始化默认调试串口
+    // 此处编写用户代码 例如外设初始化代码等
+    tft180_set_dir(TFT180_CROSSWISE);
+    tft180_init();
+    Gyro_Init();
+    Motor_Init();
+    Servo_Init();
+    Menu_Init();
+    // 此处编写用户代码 例如外设初始化代码等
+    cpu_wait_event_ready();         // 等待所有核心初始化完毕
+
+    while (TRUE)
+    {
+        Menu_Update();
+
+        if(menu_page)       //菜单界面：电机一律停
+        {
+            /* 菜单里电机停转，差速状态复位 */
+            Motor_Diff_Reset();
+            MotorL_Set_Speed(0);
+            MotorR_Set_Speed(0);
+
+            // 图像页和数据页的舵机在 Menu_Update 里每帧跟着巡线走（电机不转，方便用手推着看）
+            // 其它菜单页（列表/调参/发车）舵机回中
+            if((menu_sub != MENU_SUB_IMAGE) && (menu_sub != MENU_SUB_DATA))
+                pwm_set_duty(SERVO_MOTOR_PWM, SERVO_PWMMID);
+        }
+        else if(new_frame_flag)          /* 只有新图才更新 */
+        {
+            new_frame_flag = 0;          /* 用完把旗子放下来 */
+            /* 运行页面不再显示图像，屏幕留给菜单调试，这里只做控制 */
+
+            // race_started=0 表示还没发车（或者已经回车收车），电机保持停转
+            if(race_started == 0 || out_of_track_flag ||Zebra_Flag==1)
+            {
+                /* 停车/出界/斑马线时复位差速状态 */
+                Motor_Diff_Reset();
+                MotorL_Set_Speed(0);
+                MotorR_Set_Speed(0);
+                pwm_set_duty(SERVO_MOTOR_PWM, SERVO_PWMMID);
+            }
+            else if((Left_Island_Flag==1) && (Island_State>=1) && (Island_State<=3))
+            {
+                /* 环岛阶段用固定PWM，差速状态复位 */
+                Motor_Diff_Reset();
+                MotorL_Set_Speed(Menu_GetLeftIslandPwm());
+                MotorR_Set_Speed(Menu_GetLeftIslandPwm());
+                pwm_set_duty(SERVO_MOTOR_PWM, Servo_ControlPwm(Err));
+            }
+            else if((Right_Island_Flag==1) && (Island_State>=1) && (Island_State<=3))
+            {
+                /* 环岛阶段用固定PWM，差速状态复位 */
+                Motor_Diff_Reset();
+                MotorL_Set_Speed(Menu_GetRightIslandPwm());
+                MotorR_Set_Speed(Menu_GetRightIslandPwm());
+                pwm_set_duty(SERVO_MOTOR_PWM, Servo_ControlPwm(Err));
+            }
+            else if(Island_State==5)
+            {
+                /* 出环保持状态4最近5帧平均舵机角，左右轮使用相同Base PWM */
+                int base_pwm = Menu_GetMotorPwm();
+
+                Motor_Diff_Reset();
+                MotorL_Set_Speed(base_pwm);
+                MotorR_Set_Speed(base_pwm);
+
+                pwm_set_duty(SERVO_MOTOR_PWM, Servo_ControlPwm(Err));
+            }
+            else if(Island_State==0 && Straight_Flag==1)
+            {
+                /* 直道快速分支不用差速，复位避免切弯道时跳变 */
+                Motor_Diff_Reset();
+                MotorL_Set_Speed(Menu_GetFastPwm());
+                MotorR_Set_Speed(Menu_GetFastPwm());
+                pwm_set_duty(SERVO_MOTOR_PWM, Servo_ControlPwm(Err));
+            }
+
+            else
+            {
+                /* 差速巡线：Motor_Diff内部完成增益、限幅和变化率限制。
+                 * base_pwm：左右轮基础速度，来自菜单 Base PWM；
+                 * diff_pwm：Motor_Diff 算出的差速量，正值表示左慢右快（向左转）。 */
+                int base_pwm = Menu_GetMotorPwm();
+                int diff_pwm = Motor_Diff(base_pwm, Err);
+
+                MotorL_Set_Speed(base_pwm - diff_pwm);
+                MotorR_Set_Speed(base_pwm + diff_pwm);
+                pwm_set_duty(SERVO_MOTOR_PWM, Servo_ControlPwm(Err));
+            }
+        }
+
+    }
+}
+
+#pragma section all restore
+// **************************** 代码区域 ****************************

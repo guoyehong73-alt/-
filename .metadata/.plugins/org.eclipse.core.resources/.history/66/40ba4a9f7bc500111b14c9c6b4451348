@@ -1,0 +1,16 @@
+/*
+ * PID.h
+ *
+ *  Created on: 2026Äê9ÔÂ28ÈÕ
+ *      Author: Guoyehong6
+ */
+
+#ifndef CODE_PID_H_
+#define CODE_PID_H_
+
+#include "zf_common_headfile.h"
+
+int PD_Camera(float err);
+extern int GYRO;
+
+#endif /* CODE_PID_H_ */

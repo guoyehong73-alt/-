@@ -1,0 +1,246 @@
+/*
+ * Insland.c
+ *
+ *  Created on: 2026年9月23日
+ *      Author: Guoyehong6
+ */
+
+#include "Insland.h"
+#include "image.h"
+
+/*-------------------------------------------------------------------------------------------------------------------
+  @brief     单调性突变检测
+  @param     起始点，终止行
+  @return    点所在的行数，找不到返回0
+  Sample     Find_Right_Up_Point(int start,int end);
+  @note      前5后5它最大（最小），那他就是角点
+-------------------------------------------------------------------------------------------------------------------*/
+int Monotonicity_Change_Left(int start,int end)//单调性改变，返回值是单调性改变点所在的行数
+{
+    int i;
+    int monotonicity_change_line=0;
+    if(Left_Lost_Time>=0.9*MT9V03X_H)//大部分都丢线，没有单调性判断的意义
+       return monotonicity_change_line;
+    if(start>=MT9V03X_H-1-5)//数组越界保护，在判断第i个点时
+       start=MT9V03X_H-1-5; //要访问它前后5个点，数组两头的点要不能作为起点终点
+    if(end<=5)
+        end=5;
+    if(start<=end)//递减计算，入口反了，直接返回0
+      return monotonicity_change_line;
+    for(i=start;i>=end;i--)//会读取前5后5数据，所以前面对输入范围有要求
+    {
+        if(Left_Line[i]==Left_Line[i+5]&&Left_Line[i]==Left_Line[i-5]&&
+        Left_Line[i]==Left_Line[i+4]&&Left_Line[i]==Left_Line[i-4]&&
+        Left_Line[i]==Left_Line[i+3]&&Left_Line[i]==Left_Line[i-3]&&
+        Left_Line[i]==Left_Line[i+2]&&Left_Line[i]==Left_Line[i-2]&&
+        Left_Line[i]==Left_Line[i+1]&&Left_Line[i]==Left_Line[i-1])
+        {//一堆数据一样，显然不能作为单调转折点
+            continue;
+        }
+        else if(Left_Line[i]>=Left_Line[i+5]&&Left_Line[i]>=Left_Line[i-5]&&
+        Left_Line[i]>=Left_Line[i+4]&&Left_Line[i]>=Left_Line[i-4]&&
+        Left_Line[i]>=Left_Line[i+3]&&Left_Line[i]>=Left_Line[i-3]&&
+        Left_Line[i]>=Left_Line[i+2]&&Left_Line[i]>=Left_Line[i-2]&&
+        Left_Line[i]>=Left_Line[i+1]&&Left_Line[i]>=Left_Line[i-1])
+        {//就很暴力，这个数据是在前5，后5中最大的（可以取等），那就是单调突变点
+            monotonicity_change_line=i;
+            break;
+        }
+    }
+    return monotonicity_change_line;
+}
+
+/*-------------------------------------------------------------------------------------------------------------------
+  @brief     单调性突变检测
+  @param     起始点，终止行
+  @return    点所在的行数，找不到返回0
+  Sample     Find_Right_Up_Point(int start,int end);
+  @note      前5后5它最大（最小），那他就是角点
+-------------------------------------------------------------------------------------------------------------------*/
+int Monotonicity_Change_Right(int start,int end)//单调性改变，返回值是单调性改变点所在的行数
+{
+    int i;
+    int monotonicity_change_line=0;
+
+    if(Right_Lost_Time>=0.9*MT9V03X_H)//大部分都丢线，没有单调性判断的意义
+        return monotonicity_change_line;
+    if(start>=MT9V03X_H-1-5)//数组越界保护
+        start=MT9V03X_H-1-5;
+     if(end<=5)
+        end=5;
+    if(start<=end)
+        return monotonicity_change_line;
+    for(i=start;i>=end;i--)//会读取前5后5数据，所以前面对输入范围有要求
+    {
+        if(Right_Line[i]==Right_Line[i+5]&&Right_Line[i]==Right_Line[i-5]&&
+        Right_Line[i]==Right_Line[i+4]&&Right_Line[i]==Right_Line[i-4]&&
+        Right_Line[i]==Right_Line[i+3]&&Right_Line[i]==Right_Line[i-3]&&
+        Right_Line[i]==Right_Line[i+2]&&Right_Line[i]==Right_Line[i-2]&&
+        Right_Line[i]==Right_Line[i+1]&&Right_Line[i]==Right_Line[i-1])
+        {//一堆数据一样，显然不能作为单调转折点
+            continue;
+        }
+        else if(Right_Line[i]<=Right_Line[i+5]&&Right_Line[i]<=Right_Line[i-5]&&
+        Right_Line[i]<=Right_Line[i+4]&&Right_Line[i]<=Right_Line[i-4]&&
+        Right_Line[i]<=Right_Line[i+3]&&Right_Line[i]<=Right_Line[i-3]&&
+        Right_Line[i]<=Right_Line[i+2]&&Right_Line[i]<=Right_Line[i-2]&&
+        Right_Line[i]<=Right_Line[i+1]&&Right_Line[i]<=Right_Line[i-1])
+        {//就很暴力，这个数据是在前5，后5中最大的，那就是单调突变点
+            monotonicity_change_line=i;
+            break;
+        }
+    }
+    return monotonicity_change_line;
+}
+/*-------------------------------------------------------------------------------------------------------------------
+  @brief     左赛道连续性检测
+  @param     起始点，终止点
+  @return    连续返回0，不连续返回断线出行数
+  Sample     Continuity_Change_Left(int start,int end);
+  @note      连续性的阈值设置为5，可更改
+-------------------------------------------------------------------------------------------------------------------*/
+int Continuity_Change_Left(int start,int end)//连续性阈值设置为5
+{
+    int i;
+    int t;
+    int continuity_change_flag=0;
+    if(Left_Lost_Time>=0.9*MT9V03X_H)//大部分都丢线，没必要判断了
+       return 1;
+    if(Search_Stop_Line<=5)//搜所截止行很矮
+       return 1;
+    if(start>=MT9V03X_H-1-5)//数组越界保护
+        start=MT9V03X_H-1-5;
+    if(end<=5)
+       end=5;
+    if(start<end)//都是从下往上计算的，反了就互换一下
+    {
+       t=start;
+       start=end;
+       end=t;
+    }
+
+    for(i=start;i>=end;i--)
+    {
+       if(abs(Left_Line[i]-Left_Line[i-1])>=5)//连续判断阈值是5,可更改
+       {
+            continuity_change_flag=i;
+            break;
+       }
+    }
+    return continuity_change_flag;
+}
+
+/*-------------------------------------------------------------------------------------------------------------------
+  @brief     右赛道连续性检测
+  @param     起始点，终止点
+  @return    连续返回0，不连续返回断线出行数
+  Sample     continuity_change_flag=Continuity_Change_Right(int start,int end)
+  @note      连续性的阈值设置为5，可更改
+-------------------------------------------------------------------------------------------------------------------*/
+int Continuity_Change_Right(int start,int end)
+{
+    int i;
+    int t;
+    int continuity_change_flag=0;
+    if(Right_Lost_Time>=0.9*MT9V03X_H)//大部分都丢线，没必要判断了
+       return 1;
+    if(start>=MT9V03X_H-5)//数组越界保护
+        start=MT9V03X_H-5;
+    if(end<=5)
+       end=5;
+    if(start<end)//都是从下往上计算的，反了就互换一下
+    {
+       t=start;
+       start=end;
+       end=t;
+    }
+
+    for(i=start;i>=end;i--)
+    {
+        if(abs(Right_Line[i]-Right_Line[i-1])>=5)//连续性阈值是5，可更改
+       {
+            continuity_change_flag=i;
+            break;
+       }
+    }
+    return continuity_change_flag;
+}
+/*-------------------------------------------------------------------------------------------------------------------
+  @brief     通过斜率，定点补线--
+  @param     k       输入斜率
+             startY  输入起始点纵坐标
+             endY    结束点纵坐标
+  @return    null
+  Sample     K_Add_Boundry_Left(float k,int startY,int endY);
+  @note      补得线直接贴在边线上
+-------------------------------------------------------------------------------------------------------------------*/
+void K_Add_Boundry_Left(float k,int startX,int startY,int endY)
+{
+    int i,t;
+    if(startY>=MT9V03X_H-1)
+        startY=MT9V03X_H-1;
+    else if(startY<=0)
+        startY=0;
+    if(endY>=MT9V03X_H-1)
+        endY=MT9V03X_H-1;
+    else if(endY<=0)
+        endY=0;
+    if(startY<endY)//--操作，start需要大
+    {
+        t=startY;
+        startY=endY;
+        endY=t;
+    }
+    for(i=startY;i>=endY;i--)
+    {
+        Left_Line[i]=(int)((i-startY)/k+startX);//(y-y1)=k(x-x1)变形，x=(y-y1)/k+x1
+        if(Left_Line[i]>=MT9V03X_W-1)
+        {
+            Left_Line[i]=MT9V03X_W-1;
+        }
+        else if(Left_Line[i]<=0)
+        {
+            Left_Line[i]=0;
+        }
+    }
+}
+
+/*-------------------------------------------------------------------------------------------------------------------
+  @brief     通过斜率，定点补线
+  @param     k       输入斜率
+             startY  输入起始点纵坐标
+             endY    结束点纵坐标
+  @return    null    直接补边线
+  Sample     K_Add_Boundry_Right(float k,int startY,int endY);
+  @note      补得线直接贴在边线上
+-------------------------------------------------------------------------------------------------------------------*/
+void K_Add_Boundry_Right(float k,int startX,int startY,int endY)
+{
+    int i,t;
+    if(startY>=MT9V03X_H-1)
+        startY=MT9V03X_H-1;
+    else if(startY<=0)
+        startY=0;
+    if(endY>=MT9V03X_H-1)
+        endY=MT9V03X_H-1;
+    else if(endY<=0)
+        endY=0;
+    if(startY<endY)
+    {
+        t=startY;
+        startY=endY;
+        endY=t;
+    }
+    for(i=startY;i>=endY;i--)
+    {
+        Right_Line[i]=(int)((i-startY)/k+startX);//(y-y1)=k(x-x1)变形，x=(y-y1)/k+x1
+        if(Right_Line[i]>=MT9V03X_W-1)
+        {
+            Right_Line[i]=MT9V03X_W-1;
+        }
+        else if(Right_Line[i]<=0)
+        {
+            Right_Line[i]=0;
+        }
+    }
+}

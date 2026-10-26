@@ -1,8 +1,8 @@
 /*********************************************************************************************************************
 * 文件名称：menu.h
 * 功能说明：单页参数菜单接口
-* 参数内容：P、D、电机PWM
-* 保存说明：参数只保存在RAM中，掉电后恢复默认值
+* 参数内容：P、D、环岛PD、陀螺仪、曝光度、差速参数、电机PWM
+* 保存说明：调参页和电机PWM页的参数可保存到8套档案，掉电后从Flash恢复
 ********************************************************************************************************************/
 
 #ifndef CODE_MENU_H_
@@ -13,15 +13,19 @@
 // Err是CPU1计算出的摄像头中线误差
 extern volatile float Err;
 extern uint8 menu_page;
+extern volatile int menu_motor_pwm;
+extern volatile int menu_exposure;
+extern volatile int menu_fps;
 
 // 菜单二级页面编号（cpu0_main 里也要用它判断是不是图像页/数据页）
 // 二级页面编号
 #define MENU_SUB_LIST            (0)                // 一级菜单（页面列表）
-#define MENU_SUB_IMAGE           (1)                // 二值化图像页面
+#define MENU_SUB_IMAGE           (1)                // 图像查看页面（灰度/二值化）
 #define MENU_SUB_PARAM           (2)                // 参数调整页面
 #define MENU_SUB_DATA            (3)                // 图像数据显示页面
 #define MENU_SUB_START           (4)                // 发车倒计时页面
 #define MENU_SUB_MOTOR           (5)                // 电机PWM设置页面
+#define MENU_SUB_PROFILE         (6)                // 参数档案页面
 
 extern uint8 menu_sub;
 
@@ -47,6 +51,21 @@ float Menu_GetIsland_D(void);
 
 // 返回当前菜单中的Kgyro参数
 float Menu_GetKgyro(void);
+
+// 返回摄像头曝光度，单位由 mt9v03x_set_exposure_time 决定
+int Menu_GetExposure(void);
+
+// 返回摄像头目标帧率
+int Menu_GetFps(void);
+
+// 返回差速增益系数：1.00=原强度，0.00=关闭差速
+float Menu_GetDiffGain(void);
+
+// 返回差速绝对限幅，单位PWM
+int Menu_GetDiffMax(void);
+
+// 返回差速每帧最大变化量，单位PWM/帧，0=不限制
+int Menu_GetDiffSlew(void);
 
 // 返回菜单中的电机基础PWM
 int Menu_GetMotorPwm(void);

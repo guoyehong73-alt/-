@@ -1,0 +1,14 @@
+/*
+ * Motor.c
+ *
+ *  Created on: 2026Äê9ÔÂ26ÈÕ
+ *      Author: Guoyehong6
+ */
+#include "Motor.h"
+
+void Motor_Init()
+{
+    gpio_init(MotorL_turn, GPO, 1, GPO_PUSH_PULL);
+    pwm_init(MotorL_pwm, 5000, 0);
+}
+

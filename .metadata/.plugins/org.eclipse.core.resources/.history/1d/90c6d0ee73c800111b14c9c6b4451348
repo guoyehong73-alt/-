@@ -1,0 +1,465 @@
+/*
+ * Insland.c
+ *
+ *  Created on: 2026年9月23日
+ *      Author: Guoyehong6
+ */
+
+#include  "Island.h"
+#include "image.h"
+#include "control.h"
+#include "PID.h"
+
+/*-------------------------------------------------------------------------------------------------------------------
+  @brief     单调性突变检测
+  @param     起始点，终止行
+  @return    点所在的行数，找不到返回0
+  Sample     Find_Right_Up_Point(int start,int end);
+  @note      前5后5它最大（最小），那他就是角点
+-------------------------------------------------------------------------------------------------------------------*/
+int Monotonicity_Change_Left(int start,int end)//单调性改变，返回值是单调性改变点所在的行数
+{
+    int i;
+    int monotonicity_change_line=0;
+    if(Left_Lost_Time>=0.9*MT9V03X_H)//大部分都丢线，没有单调性判断的意义
+       return monotonicity_change_line;
+    if(start>=MT9V03X_H-1-5)//数组越界保护，在判断第i个点时
+       start=MT9V03X_H-1-5; //要访问它前后5个点，数组两头的点要不能作为起点终点
+    if(end<=5)
+        end=5;
+    if(start<=end)//递减计算，入口反了，直接返回0
+      return monotonicity_change_line;
+    for(i=start;i>=end;i--)//会读取前5后5数据，所以前面对输入范围有要求
+    {
+        if(Left_Line[i]==Left_Line[i+5]&&Left_Line[i]==Left_Line[i-5]&&
+        Left_Line[i]==Left_Line[i+4]&&Left_Line[i]==Left_Line[i-4]&&
+        Left_Line[i]==Left_Line[i+3]&&Left_Line[i]==Left_Line[i-3]&&
+        Left_Line[i]==Left_Line[i+2]&&Left_Line[i]==Left_Line[i-2]&&
+        Left_Line[i]==Left_Line[i+1]&&Left_Line[i]==Left_Line[i-1])
+        {//一堆数据一样，显然不能作为单调转折点
+            continue;
+        }
+        else if(Left_Line[i]>=Left_Line[i+5]&&Left_Line[i]>=Left_Line[i-5]&&
+        Left_Line[i]>=Left_Line[i+4]&&Left_Line[i]>=Left_Line[i-4]&&
+        Left_Line[i]>=Left_Line[i+3]&&Left_Line[i]>=Left_Line[i-3]&&
+        Left_Line[i]>=Left_Line[i+2]&&Left_Line[i]>=Left_Line[i-2]&&
+        Left_Line[i]>=Left_Line[i+1]&&Left_Line[i]>=Left_Line[i-1])
+        {//就很暴力，这个数据是在前5，后5中最大的（可以取等），那就是单调突变点
+            monotonicity_change_line=i;
+            break;
+        }
+    }
+    return monotonicity_change_line;
+}
+
+/*-------------------------------------------------------------------------------------------------------------------
+  @brief     单调性突变检测
+  @param     起始点，终止行
+  @return    点所在的行数，找不到返回0
+  Sample     Find_Right_Up_Point(int start,int end);
+  @note      前5后5它最大（最小），那他就是角点
+-------------------------------------------------------------------------------------------------------------------*/
+int Monotonicity_Change_Right(int start,int end)//单调性改变，返回值是单调性改变点所在的行数
+{
+    int i;
+    int monotonicity_change_line=0;
+
+    if(Right_Lost_Time>=0.9*MT9V03X_H)//大部分都丢线，没有单调性判断的意义
+        return monotonicity_change_line;
+    if(start>=MT9V03X_H-1-5)//数组越界保护
+        start=MT9V03X_H-1-5;
+     if(end<=5)
+        end=5;
+    if(start<=end)
+        return monotonicity_change_line;
+    for(i=start;i>=end;i--)//会读取前5后5数据，所以前面对输入范围有要求
+    {
+        if(Right_Line[i]==Right_Line[i+5]&&Right_Line[i]==Right_Line[i-5]&&
+        Right_Line[i]==Right_Line[i+4]&&Right_Line[i]==Right_Line[i-4]&&
+        Right_Line[i]==Right_Line[i+3]&&Right_Line[i]==Right_Line[i-3]&&
+        Right_Line[i]==Right_Line[i+2]&&Right_Line[i]==Right_Line[i-2]&&
+        Right_Line[i]==Right_Line[i+1]&&Right_Line[i]==Right_Line[i-1])
+        {//一堆数据一样，显然不能作为单调转折点
+            continue;
+        }
+        else if(Right_Line[i]<=Right_Line[i+5]&&Right_Line[i]<=Right_Line[i-5]&&
+        Right_Line[i]<=Right_Line[i+4]&&Right_Line[i]<=Right_Line[i-4]&&
+        Right_Line[i]<=Right_Line[i+3]&&Right_Line[i]<=Right_Line[i-3]&&
+        Right_Line[i]<=Right_Line[i+2]&&Right_Line[i]<=Right_Line[i-2]&&
+        Right_Line[i]<=Right_Line[i+1]&&Right_Line[i]<=Right_Line[i-1])
+        {//就很暴力，这个数据是在前5，后5中最大的，那就是单调突变点
+            monotonicity_change_line=i;
+            break;
+        }
+    }
+    return monotonicity_change_line;
+}
+/*-------------------------------------------------------------------------------------------------------------------
+  @brief     左赛道连续性检测
+  @param     起始点，终止点
+  @return    连续返回0，不连续返回断线出行数
+  Sample     Continuity_Change_Left(int start,int end);
+  @note      连续性的阈值设置为5，可更改
+-------------------------------------------------------------------------------------------------------------------*/
+int Continuity_Change_Left(int start,int end)//连续性阈值设置为5
+{
+    int i;
+    int t;
+    int continuity_change_flag=0;
+    if(Left_Lost_Time>=0.9*MT9V03X_H)//大部分都丢线，没必要判断了
+       return 1;
+    if(Search_Stop_Line<=5)//搜所截止行很矮
+       return 1;
+    if(start>=MT9V03X_H-1-5)//数组越界保护
+        start=MT9V03X_H-1-5;
+    if(end<=5)
+       end=5;
+    if(start<end)//都是从下往上计算的，反了就互换一下
+    {
+       t=start;
+       start=end;
+       end=t;
+    }
+
+    for(i=start;i>=end;i--)
+    {
+       if(abs(Left_Line[i]-Left_Line[i-1])>=5)//连续判断阈值是5,可更改
+       {
+            continuity_change_flag=i;
+            break;
+       }
+    }
+    return continuity_change_flag;
+}
+
+/*-------------------------------------------------------------------------------------------------------------------
+  @brief     右赛道连续性检测
+  @param     起始点，终止点
+  @return    连续返回0，不连续返回断线出行数
+  Sample     continuity_change_flag=Continuity_Change_Right(int start,int end)
+  @note      连续性的阈值设置为5，可更改
+-------------------------------------------------------------------------------------------------------------------*/
+int Continuity_Change_Right(int start,int end)
+{
+    int i;
+    int t;
+    int continuity_change_flag=0;
+    if(Right_Lost_Time>=0.9*MT9V03X_H)//大部分都丢线，没必要判断了
+       return 1;
+    if(start>=MT9V03X_H-5)//数组越界保护
+        start=MT9V03X_H-5;
+    if(end<=5)
+       end=5;
+    if(start<end)//都是从下往上计算的，反了就互换一下
+    {
+       t=start;
+       start=end;
+       end=t;
+    }
+
+    for(i=start;i>=end;i--)
+    {
+        if(abs(Right_Line[i]-Right_Line[i-1])>=6)//连续性阈值是5，可更改
+       {
+            continuity_change_flag=i;
+            break;
+       }
+    }
+    return continuity_change_flag;
+}
+///*-------------------------------------------------------------------------------------------------------------------
+//  @brief     通过斜率，定点补线--
+//  @param     k       输入斜率
+//             startY  输入起始点纵坐标
+//             endY    结束点纵坐标
+//  @return    null
+//  Sample     K_Add_Boundry_Left(float k,int startY,int endY);
+//  @note      补得线直接贴在边线上
+//-------------------------------------------------------------------------------------------------------------------*/
+//void K_Add_Boundry_Left(float k,int startX,int startY,int endY)
+//{
+//    int i,t;
+//    if(startY>=MT9V03X_H-1)
+//        startY=MT9V03X_H-1;
+//    else if(startY<=0)
+//        startY=0;
+//    if(endY>=MT9V03X_H-1)
+//        endY=MT9V03X_H-1;
+//    else if(endY<=0)
+//        endY=0;
+//    if(startY<endY)//--操作，start需要大
+//    {
+//        t=startY;
+//        startY=endY;
+//        endY=t;
+//    }
+//    for(i=startY;i>=endY;i--)
+//    {
+//        Left_Line[i]=(int)((i-startY)/k+startX);//(y-y1)=k(x-x1)变形，x=(y-y1)/k+x1
+//        if(Left_Line[i]>=MT9V03X_W-1)
+//        {
+//            Left_Line[i]=MT9V03X_W-1;
+//        }
+//        else if(Left_Line[i]<=0)
+//        {
+//            Left_Line[i]=0;
+//        }
+//    }
+//}
+//
+///*-------------------------------------------------------------------------------------------------------------------
+//  @brief     通过斜率，定点补线
+//  @param     k       输入斜率
+//             startY  输入起始点纵坐标
+//             endY    结束点纵坐标
+//  @return    null    直接补边线
+//  Sample     K_Add_Boundry_Right(float k,int startY,int endY);
+//  @note      补得线直接贴在边线上
+//-------------------------------------------------------------------------------------------------------------------*/
+//void K_Add_Boundry_Right(float k,int startX,int startY,int endY)
+//{
+//    int i,t;
+//    if(startY>=MT9V03X_H-1)
+//        startY=MT9V03X_H-1;
+//    else if(startY<=0)
+//        startY=0;
+//    if(endY>=MT9V03X_H-1)
+//        endY=MT9V03X_H-1;
+//    else if(endY<=0)
+//        endY=0;
+//    if(startY<endY)
+//    {
+//        t=startY;
+//        startY=endY;
+//        endY=t;
+//    }
+//    for(i=startY;i>=endY;i--)
+//    {
+//        Right_Line[i]=(int)((i-startY)/k+startX);//(y-y1)=k(x-x1)变形，x=(y-y1)/k+x1
+//        if(Right_Line[i]>=MT9V03X_W-1)
+//        {
+//            Right_Line[i]=MT9V03X_W-1;
+//        }
+//        else if(Right_Line[i]<=0)
+//        {
+//            Right_Line[i]=0;
+//        }
+//    }
+//}
+
+extern volatile int Left_Island_Flag=0;
+extern volatile int Right_Island_Flag=0;
+static float Ring_Start_Yaw = 0;
+
+void Island_Reset(void)
+{
+    Island_State = 0;
+    Left_Island_Flag = 0;
+    Right_Island_Flag = 0;
+    Ring_Start_Yaw = 0;
+}
+
+void Island_Detect(void)
+{
+    //static int count=0;     //强制限制环岛3时间
+    int continuity_change_left_flag=0;
+    int continuity_change_right_flag=0;
+    int monotonicity_change_right_flag=0;
+    int monotonicity_change_left_flag=0;
+    int monotonicity_change_line[2];
+    static int left_down_guai[2]={0};
+    static int right_down_guai[2]={0};
+    static int left_up_guai[2]={0};
+    static int right_up_guai[2]={0};
+
+//    if(race_started == 0)
+//    {
+//        Island_Reset();
+//        return;
+//    }
+
+
+    if(Cross_Flag==0&&Ramp_Flag==0)
+    {
+        monotonicity_change_right_flag=Monotonicity_Change_Right(MT9V03X_H-1-10,10);
+        monotonicity_change_left_flag=Monotonicity_Change_Left(MT9V03X_H-1-10,10);
+        continuity_change_left_flag=Continuity_Change_Left(MT9V03X_H-1-5,10);
+        continuity_change_right_flag=Continuity_Change_Right(MT9V03X_H-1-5,10);
+        if(Left_Island_Flag==0&&Right_Island_Flag==0&&Island_State==0)
+        {
+             if (monotonicity_change_right_flag==0&&
+                 continuity_change_left_flag!=0&&
+                 continuity_change_right_flag==0&&
+                 Left_Lost_Time>=10&&
+                 Left_Lost_Time<=100&&
+                 Right_Lost_Time<=25&&
+                 Search_Stop_Line>=MT9V03X_H*0.9&&
+                 Boundry_Start_Left>=MT9V03X_H-30&&Boundry_Start_Right>=MT9V03X_H-30&&
+                 Both_Lost_Time<=25)
+             {
+                  left_down_guai[0]=Find_Left_Down_Inflection_Point(MT9V03X_H-1,20);
+                  if(left_down_guai[0]>30)
+                  {
+                      Island_State=1;
+                      Left_Island_Flag=1;
+                  }
+                  else
+                  {
+                      Island_State=0;
+                      Left_Island_Flag=0;
+                  }
+             }
+             //右环岛检测：条件与左环岛完全镜像
+             else if(continuity_change_left_flag==0&&
+                     continuity_change_right_flag!=0&&
+                     Right_Lost_Time>=10&&
+                     Right_Lost_Time<=100&&
+                     Left_Lost_Time<=25&&
+                     Search_Stop_Line>=MT9V03X_H*0.9&&
+                     Boundry_Start_Left>=MT9V03X_H-30&&Boundry_Start_Right>=MT9V03X_H-30&&
+                     Both_Lost_Time<=25)
+             {
+                  right_down_guai[0]=Find_Right_Down_Inflection_Point(MT9V03X_H-1,20);
+                  if(right_down_guai[0]>30)
+                  {
+                      Island_State=1;
+                      Right_Island_Flag=1;
+                  }
+                  else
+                  {
+                      Island_State=0;
+                      Right_Island_Flag=0;
+                  }
+             }
+        }
+
+        if(Left_Island_Flag==1&&Island_State==1)        //第一次补线
+        {
+            monotonicity_change_line[0]=Monotonicity_Change_Left(30,5);
+            monotonicity_change_line[1]=Left_Line[monotonicity_change_line[0]];
+            Left_Add_Line((int)(monotonicity_change_line[1]*0.15),MT9V03X_H-1,monotonicity_change_line[1],monotonicity_change_line[0]);
+
+            if((Island_State==1)&&(Left_Lost_Time>49))
+            {
+                Island_State=2;
+            }
+        }
+        else if(Right_Island_Flag==1&&Island_State==1)  //右环第一次补线
+        {
+            monotonicity_change_line[0]=Monotonicity_Change_Right(30,5);
+            monotonicity_change_line[1]=Right_Line[monotonicity_change_line[0]];
+            Right_Add_Line((int)(MT9V03X_W-1-(MT9V03X_W-1-monotonicity_change_line[1])*0.15),MT9V03X_H-1,monotonicity_change_line[1],monotonicity_change_line[0]);
+
+            if((Island_State==1)&&(Right_Lost_Time>41))
+            {
+                Island_State=2;
+            }
+        }
+        else if(Left_Island_Flag==1&&Island_State==2)        //第二次补线
+        {
+            monotonicity_change_line[0]=Monotonicity_Change_Left(MT9V03X_H-5,30);
+            monotonicity_change_line[1]=Left_Line[monotonicity_change_line[0]];
+            Left_Add_Line((int)(monotonicity_change_line[1]*0.1),MT9V03X_H-1,monotonicity_change_line[1],monotonicity_change_line[0]);
+            if(Island_State==2&&(Left_Lost_Time<=38))
+            {
+                Island_State=3;
+                Left_Island_Flag=1;
+                Ring_Start_Yaw = Yaw_Total;
+            }
+        }
+        else if(Right_Island_Flag==1&&Island_State==2)        //右环第二次补线
+        {
+            monotonicity_change_line[0]=Monotonicity_Change_Right(MT9V03X_H-5,30);
+            monotonicity_change_line[1]=Right_Line[monotonicity_change_line[0]];
+            Right_Add_Line((int)(MT9V03X_W-1-(MT9V03X_W-1-monotonicity_change_line[1])*0.1),MT9V03X_H-1,monotonicity_change_line[1],monotonicity_change_line[0]);
+            if(Island_State==2&&(Right_Lost_Time<=44))
+            {
+                Island_State=3;
+                Right_Island_Flag=1;
+                Ring_Start_Yaw = Yaw_Total;
+            }
+        }
+        else if(Island_State==3)        //准备入环+入环
+        {
+            XunXian();
+            if(Right_Island_Flag==1)//右环
+            {
+                //右环：按左环镜像补左边界进环
+                left_down_guai[0]=Find_Left_Down_Inflection_Point(60, 5);
+                right_up_guai[0]=Find_Right_Up_Inflection_Point(MT9V03X_H-5, 5);
+                right_up_guai[1]=Right_Line[right_up_guai[0]];
+                Left_Add_Line((int)Left_Line[Boundry_Start_Left],Boundry_Start_Left, right_up_guai[1], right_up_guai[0]);
+//                if(Island_State==3 && count>60 && Left_Lost_Time>80 && Right_Lost_Time>75 && left_down_guai[0]!=0 )
+//                {
+//                    count=0;
+//                    Island_State=4;
+//                }
+                if(fabs(Yaw_Total - Ring_Start_Yaw) >= 330.0f)
+                {
+                    Island_State = 4;
+                }
+            }
+            else//左环
+            {
+                right_down_guai[0]=Find_Right_Down_Inflection_Point(60, 5);
+                left_up_guai[0]=Find_Left_Up_Inflection_Point(MT9V03X_H-5, 5);
+                left_up_guai[1]=Left_Line[left_up_guai[0]];
+                Right_Add_Line((int)Right_Line[Boundry_Start_Right],Boundry_Start_Right, left_up_guai[1], left_up_guai[0]);
+//                if(Island_State==3 && count>60 && Right_Lost_Time>80 && Left_Lost_Time>75 && right_down_guai[0]!=0 )
+//                {
+//                    count=0;
+//                    Island_State=4;
+//                }
+                if(fabs(Yaw_Total - Ring_Start_Yaw) >= 330.0f)
+                {
+                    Island_State = 4;
+                }
+            }
+        }
+        else if(Island_State==4)        //出环
+        {
+            XunXian();
+            if(Right_Island_Flag==1)
+            {
+                //右环：按左环镜像延长右边界出环
+                right_up_guai[0]=Find_Right_Up_Inflection_Point(MT9V03X_H-5, 5);
+                Lengthen_Right_Boundry(right_up_guai[0],MT9V03X_H-1);
+                if(Island_State==4 && Search_Stop_Line>105 && Search_Stop_Line<119 && right_up_guai[0]==0)
+                {
+                    Island_State=0;
+                    Right_Island_Flag=0;
+                }
+            }
+            else
+            {
+                left_up_guai[0]=Find_Left_Up_Inflection_Point(MT9V03X_H-5, 5);
+                Lengthen_Left_Boundry(left_up_guai[0],MT9V03X_H-1);
+                if(Island_State==4 && Search_Stop_Line>105 && Search_Stop_Line<119 && left_up_guai[0]==0)
+                {
+                    Island_State=0;
+                    Left_Island_Flag=0;
+                }
+            }
+        }
+        /* ---- 状态4卡死保护 ---- */
+        {
+            static uint16 state4_frame = 0;
+
+            if(Island_State == 4)
+            {
+                state4_frame++;
+                if(state4_frame > 50)
+                {
+                    Island_State = 0;
+                    Left_Island_Flag = 0;       /* 一起清掉，不然以后检不到新的环岛 */
+                    Right_Island_Flag = 0;
+                    state4_frame = 0;
+                }
+            }
+            else
+            {
+                state4_frame = 0;               /* 只要不是状态3，就重新计时 */
+            }
+        }
+    }
+}

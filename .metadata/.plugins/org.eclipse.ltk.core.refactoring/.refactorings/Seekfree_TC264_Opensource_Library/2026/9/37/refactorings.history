@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<session version="1.0">
+<refactoring comment="Rename resource &apos;Seekfree_TC264_Opensource_Library/code/test.c&apos; to &apos;.c&apos;" description="Rename resource &apos;test.c&apos;" flags="7" id="org.eclipse.ltk.core.refactoring.rename.resource" input="code/test.c" name=".c" stamp="1789286820815" updateReferences="true"/>
+</session>

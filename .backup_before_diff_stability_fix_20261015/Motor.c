@@ -1,0 +1,73 @@
+/*
+ * Motor.c
+ *
+ *  Created on: 2026年9月26日
+ *      Author: Guoyehong6
+ */
+#include "Motor.h"
+
+void Motor_Init(void)
+{
+    gpio_init(MotorL_turn, GPO, 1, GPO_PUSH_PULL);
+    pwm_init(MotorL_pwm, 5000, 0);
+    gpio_init(MotorR_turn, GPO, 1, GPO_PUSH_PULL);
+    pwm_init(MotorR_pwm, 5000, 0);
+}
+
+void MotorL_Set_Speed(int pwm)
+{
+    if(pwm>=SPEED_MAX)        //限幅处理
+       pwm=SPEED_MAX;
+    else if(pwm<=SPEED_MIN)
+       pwm=SPEED_MIN;
+
+    if(pwm>=0)
+    {
+        gpio_set_level(MotorL_turn, 1);
+        pwm_set_duty(MotorL_pwm, pwm);
+    }
+    else
+    {
+        gpio_set_level(MotorL_turn, 0);
+        pwm_set_duty(MotorL_pwm, -pwm);
+    }
+}
+
+void MotorR_Set_Speed(int pwm)
+{
+    if(pwm>=SPEED_MAX)        //限幅处理
+            pwm=SPEED_MAX;
+    else if(pwm<=SPEED_MIN)
+            pwm=SPEED_MIN;
+
+    if(pwm>=0)
+    {
+        gpio_set_level(MotorR_turn, 0);
+        pwm_set_duty(MotorR_pwm, pwm);
+    }
+    else
+    {
+        gpio_set_level(MotorR_turn, 1);
+        pwm_set_duty(MotorR_pwm, -pwm);
+    }
+}
+int Motor_PD(float err)
+{
+    int turn;
+    float  P=Menu_GetKp();
+    float  D=Menu_GetKd();
+    volatile static float error_current,error_last;
+    float er,er1;
+    error_current=err;
+    er=error_current;
+    er1=error_current-error_last;
+    turn=P*er*13+D*er1*13;
+    //out=P*er+D*er1-Kgyro*gyro_z_dps+SERVO_PWMMID;
+    error_last=error_current;
+
+    if(turn>=SPEED_MAX)//限幅处理
+        turn=SPEED_MAX;
+    else if(turn<=SPEED_MIN)//限幅处理
+        turn=SPEED_MIN;
+    return (int)turn;
+}

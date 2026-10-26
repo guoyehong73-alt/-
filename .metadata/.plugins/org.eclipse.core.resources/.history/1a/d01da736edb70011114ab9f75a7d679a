@@ -1,0 +1,54 @@
+/*
+ * led.c
+ *
+ *  Created on: 2026Äê9ÔÂ13ÈÕ
+ *      Author: Guoyehong6
+ */
+
+#include "led.h"
+
+void Led_Init()
+{
+    gpio_init(P02_4, GPO, 0, GPO_PUSH_PULL);
+    gpio_init(P02_5, GPO, 0, GPO_PUSH_PULL);
+    gpio_init(P02_6, GPO, 0, GPO_PUSH_PULL);
+    gpio_init(P02_7, GPO, 0, GPO_PUSH_PULL);
+}
+
+void LiuShui()
+{
+    for(int i=0; i<5; i++)
+        {
+            if(i==4)i=0;
+            if(i==0)
+            {
+                gpio_set_level(P02_4, 1);
+                gpio_set_level(P02_5, 0);
+                gpio_set_level(P02_6, 0);
+                gpio_set_level(P02_7, 0);
+            }
+            else if(i==1)
+            {
+                gpio_set_level(P02_4, 0);
+                gpio_set_level(P02_5, 1);
+                gpio_set_level(P02_6, 0);
+                gpio_set_level(P02_7, 0);
+            }
+            else if(i==2)
+            {
+                gpio_set_level(P02_4, 0);
+                gpio_set_level(P02_5, 0);
+                gpio_set_level(P02_6, 1);
+                gpio_set_level(P02_7, 0);
+            }
+            else if(i==3)
+            {
+                gpio_set_level(P02_4, 0);
+                gpio_set_level(P02_5, 0);
+                gpio_set_level(P02_6, 0);
+                gpio_set_level(P02_7, 1);
+            }
+            system_delay_ms(500);
+        }
+
+}

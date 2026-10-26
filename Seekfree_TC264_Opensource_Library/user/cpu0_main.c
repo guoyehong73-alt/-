@@ -55,12 +55,15 @@ int core0_main(void)
     Menu_Init();
     // 此处编写用户代码 例如外设初始化代码等
     cpu_wait_event_ready();         // 等待所有核心初始化完毕
+
     while (TRUE)
     {
         Menu_Update();
 
         if(menu_page)       //菜单界面：电机一律停
         {
+            /* 菜单里电机停转，差速状态复位 */
+            Motor_Diff_Reset();
             MotorL_Set_Speed(0);
             MotorR_Set_Speed(0);
 
@@ -77,34 +80,58 @@ int core0_main(void)
             // race_started=0 表示还没发车（或者已经回车收车），电机保持停转
             if(race_started == 0 || out_of_track_flag ||Zebra_Flag==1)
             {
+                /* 停车/出界/斑马线时复位差速状态 */
+                Motor_Diff_Reset();
                 MotorL_Set_Speed(0);
                 MotorR_Set_Speed(0);
                 pwm_set_duty(SERVO_MOTOR_PWM, SERVO_PWMMID);
             }
-            else if(Left_Island_Flag==1)
+            else if((Left_Island_Flag==1) && (Island_State>=1) && (Island_State<=6))
             {
+                /* 环岛阶段用固定PWM，差速状态复位 */
+                Motor_Diff_Reset();
                 MotorL_Set_Speed(Menu_GetLeftIslandPwm());
                 MotorR_Set_Speed(Menu_GetLeftIslandPwm());
-                pwm_set_duty(SERVO_MOTOR_PWM, PD_Camera(Err));
+                pwm_set_duty(SERVO_MOTOR_PWM, Servo_ControlPwm(Err));
             }
-            else if(Right_Island_Flag==1)
+            else if((Right_Island_Flag==1) && (Island_State>=1) && (Island_State<=6))
             {
+                /* 环岛阶段用固定PWM，差速状态复位 */
+                Motor_Diff_Reset();
                 MotorL_Set_Speed(Menu_GetRightIslandPwm());
                 MotorR_Set_Speed(Menu_GetRightIslandPwm());
-                pwm_set_duty(SERVO_MOTOR_PWM, PD_Camera(Err));
+                pwm_set_duty(SERVO_MOTOR_PWM, Servo_ControlPwm(Err));
             }
-            else if(Search_Stop_Line>112 && Island_State==0 )
+//            else if(Island_State==6)
+//            {
+//                int base_pwm = Menu_GetMotorPwm();
+//
+//                Motor_Diff_Reset();
+//                MotorL_Set_Speed(base_pwm);
+//                MotorR_Set_Speed(base_pwm);
+//
+//                pwm_set_duty(SERVO_MOTOR_PWM, Servo_ControlPwm(Err));
+//            }
+            else if(Island_State==0 && Straight_Flag==1)
             {
+                /* 直道快速分支不用差速，复位避免切弯道时跳变 */
+                Motor_Diff_Reset();
                 MotorL_Set_Speed(Menu_GetFastPwm());
                 MotorR_Set_Speed(Menu_GetFastPwm());
-                pwm_set_duty(SERVO_MOTOR_PWM, PD_Camera(Err));
+                pwm_set_duty(SERVO_MOTOR_PWM, Servo_ControlPwm(Err));
             }
 
             else
             {
-                MotorL_Set_Speed(Menu_GetMotorPwm());
-                MotorR_Set_Speed(Menu_GetMotorPwm());
-                pwm_set_duty(SERVO_MOTOR_PWM, PD_Camera(Err));
+                /* 差速巡线：Motor_Diff内部完成增益、限幅和变化率限制。
+                 * base_pwm：左右轮基础速度，来自菜单 Base PWM；
+                 * diff_pwm：Motor_Diff 算出的差速量，正值表示左慢右快（向左转）。 */
+                int base_pwm = Menu_GetMotorPwm();
+                int diff_pwm = Motor_Diff(base_pwm, Err);
+
+                MotorL_Set_Speed(base_pwm - diff_pwm);
+                MotorR_Set_Speed(base_pwm + diff_pwm);
+                pwm_set_duty(SERVO_MOTOR_PWM, Servo_ControlPwm(Err));
             }
         }
 

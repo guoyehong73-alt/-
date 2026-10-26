@@ -1,0 +1,570 @@
+/*********************************************************************************************************************
+* 文件名称：menu.c
+* 功能说明：二级菜单，一级菜单选页面，二级页面分别是图像、参数、数据、发车
+* 页面内容：一级菜单列表 / 二值化图像 / P、D、电机PWM / 图像数据 / 发车倒计时
+* 保存说明：参数只保存在RAM中，掉电后恢复默认值
+* 按键说明：
+*           运行页面  S4 = P22_2：进入菜单
+*           一级菜单  S1 = P32_4：移动光标
+*                     S3 = P23_1：确定键，进入光标选中的页面（选到 4 START 即发车）
+*           二级页面  S4 = P22_2：返回一级菜单（调参页还可用 S1切换参数、S2减小、S3增大）
+*           发车页面  一级菜单选到 4 START 按 S3 后，先停顿 MENU_START_DELAY_MS 毫秒再切到运行页面
+********************************************************************************************************************/
+
+#include "menu.h"
+#include "control.h"
+
+// P参数最小值
+#define MENU_KP_MIN              (0.0f)
+
+// P参数最大值
+#define MENU_KP_MAX              (3.0f)
+
+// P参数调整步长
+#define MENU_KP_STEP             (0.05f)
+
+// D参数最小值
+#define MENU_KD_MIN              (0.0f)
+
+// D参数最大值
+#define MENU_KD_MAX              (4.0f)
+
+// D参数调整步长
+#define MENU_KD_STEP             (0.05f)
+
+// 电机PWM最小值
+#define MENU_MOTOR_MIN           (0)
+
+// 电机PWM最大值
+#define MENU_MOTOR_MAX           (4000)
+
+// 电机PWM调整步长
+#define MENU_MOTOR_STEP          (100)
+
+// 二级页刷新分频：每 N 帧刷一次，太重会把按键扫描拖慢
+#define MENU_REFRESH_DIV         (5)
+
+// 发车后必须停顿的时间（裁判要求发车后停顿1~2秒），单位毫秒
+#define MENU_START_DELAY_MS      (2000)
+
+// 当前选中的参数编号
+typedef enum
+{
+    // 当前选中P
+    MENU_ITEM_P = 0,
+
+    // 当前选中D
+    MENU_ITEM_D,
+
+    // 当前选中电机PWM
+    MENU_ITEM_MOTOR,
+
+    // 参数总数
+    MENU_ITEM_COUNT,
+} menu_item_enum;
+
+// 当前P参数
+static volatile float menu_kp = 1.69f;
+
+// 当前D参数
+static volatile float menu_kd = 2.99f;
+
+// 当前电机基础PWM
+volatile int menu_motor_pwm = 2100;
+
+// 当前选中的参数
+static uint8 menu_item = MENU_ITEM_P;
+
+// 1表示菜单页面，0表示图像页面
+uint8 menu_page = 0;
+
+// 1表示需要重绘菜单
+static uint8 menu_dirty = 1;
+
+// 当前二级页面编号，取值见上面的 MENU_SUB_xxx
+uint8 menu_sub = MENU_SUB_LIST;
+
+// 发车标志：只有发车之后 cpu0_main 才会驱动电机
+uint8 race_started = 0;
+
+// 一级菜单光标位置 0=图像 1=调参 2=数据
+static uint8 menu_cursor = 0;
+// 二级页刷新计数
+static uint8 menu_refresh_cnt = 0;
+
+/*********************************************************************************************************************
+* 函数名称：Menu_KeyEvent
+* 功能说明：查询某个按键有没有事件（直接用库里的按键驱动）
+* 参数说明：key 按键编号 KEY_1~KEY_4
+* 返回说明：1表示有按键事件，0表示无按键事件
+* 备    注：key_init(1) + 1ms定时器里调 key_scanner()，10次采样=10ms，所以点一下就能认
+********************************************************************************************************************/
+static uint8 Menu_KeyEvent(key_index_enum key)
+{
+    key_state_enum state = key_get_state(key);
+
+    if((state == KEY_SHORT_PRESS) || (state == KEY_LONG_PRESS))
+    {
+        key_clear_state(key);
+        return 1;
+    }
+
+    return 0;
+}
+/*********************************************************************************************************************
+* 函数名称：Menu_Adjust
+* 功能说明：调整当前选中的参数
+* 参数说明：direction 1表示增大，-1表示减小
+* 返回说明：无
+********************************************************************************************************************/
+static void Menu_Adjust(int direction)
+{
+    // 调整P
+    if(menu_item == MENU_ITEM_P)
+    {
+        menu_kp += direction * MENU_KP_STEP;
+
+        if(menu_kp < MENU_KP_MIN)
+            menu_kp = MENU_KP_MIN;
+        if(menu_kp > MENU_KP_MAX)
+            menu_kp = MENU_KP_MAX;
+    }
+    // 调整D
+    else if(menu_item == MENU_ITEM_D)
+    {
+        menu_kd += direction * MENU_KD_STEP;
+
+        if(menu_kd < MENU_KD_MIN)
+            menu_kd = MENU_KD_MIN;
+        if(menu_kd > MENU_KD_MAX)
+            menu_kd = MENU_KD_MAX;
+    }
+    // 调整电机PWM
+    else
+    {
+        menu_motor_pwm += direction * MENU_MOTOR_STEP;
+
+        if(menu_motor_pwm < MENU_MOTOR_MIN)
+            menu_motor_pwm = MENU_MOTOR_MIN;
+        if(menu_motor_pwm > MENU_MOTOR_MAX)
+            menu_motor_pwm = MENU_MOTOR_MAX;
+    }
+
+    // 参数变化后需要重绘
+    menu_dirty = 1;
+}
+
+/*********************************************************************************************************************
+* 函数名称：Menu_Draw
+* 功能说明：绘制单页参数菜单
+* 参数说明：无
+* 返回说明：无
+********************************************************************************************************************/
+static void Menu_Draw(void)
+{
+    // 清屏
+    tft180_full(RGB565_BLACK);
+
+    // 8x16字体显示参数
+    tft180_set_font(TFT180_8X16_FONT);
+    tft180_set_color(RGB565_CYAN, RGB565_BLACK);
+    tft180_show_string(0, 0, "PARAM SET");
+
+    // 显示P
+    tft180_set_color((menu_item == MENU_ITEM_P) ? RGB565_YELLOW : RGB565_WHITE,
+                     RGB565_BLACK);
+    tft180_show_string(0, 28, "P:");
+    tft180_show_float(32, 28, menu_kp, 4, 2);
+
+    // 显示D
+    tft180_set_color((menu_item == MENU_ITEM_D) ? RGB565_YELLOW : RGB565_WHITE,
+                     RGB565_BLACK);
+    tft180_show_string(0, 52, "D:");
+    tft180_show_float(32, 52, menu_kd, 4, 2);
+
+    // 显示电机PWM
+    tft180_set_color((menu_item == MENU_ITEM_MOTOR) ? RGB565_YELLOW : RGB565_WHITE,
+                     RGB565_BLACK);
+    tft180_show_string(0, 76, "PWM:");
+    tft180_show_int(40, 76, menu_motor_pwm, 4);
+
+    // 按键提示
+    tft180_set_font(TFT180_6X8_FONT);
+    tft180_set_color(RGB565_WHITE, RGB565_BLACK);
+    tft180_show_string(0, 104, "S1:NEXT S2- S3+");
+    tft180_show_string(0, 116, "S4:BACK");
+}
+
+/*********************************************************************************************************************
+* 函数名称：Menu_DrawLevel1
+* 功能说明：绘制一级菜单，选择要进入哪个二级页面
+* 参数说明：无
+* 返回说明：无
+* 备    注：S1移动光标；S3是确定键，选到 4 START 按 S3 就是发车
+********************************************************************************************************************/
+static void Menu_DrawLevel1(void)
+{
+    // 清屏
+    tft180_full(RGB565_BLACK);
+
+    // 标题
+    tft180_set_font(TFT180_8X16_FONT);
+    tft180_set_color(RGB565_CYAN, RGB565_BLACK);
+    tft180_show_string(0, 0, "MENU");
+
+    // 光标所在的那一项用黄色，其余用白色
+    tft180_set_color((menu_cursor == 0) ? RGB565_YELLOW : RGB565_WHITE, RGB565_BLACK);
+    tft180_show_string(8, 28, "1 IMAGE");
+
+    tft180_set_color((menu_cursor == 1) ? RGB565_YELLOW : RGB565_WHITE, RGB565_BLACK);
+    tft180_show_string(8, 48, "2 PARAM");
+
+    tft180_set_color((menu_cursor == 2) ? RGB565_YELLOW : RGB565_WHITE, RGB565_BLACK);
+    tft180_show_string(8, 68, "3 DATA");
+
+    tft180_set_color((menu_cursor == 3) ? RGB565_YELLOW : RGB565_WHITE, RGB565_BLACK);
+    tft180_show_string(8, 88, "4 START");
+
+    // 按键提示
+    tft180_set_font(TFT180_6X8_FONT);
+    tft180_set_color(RGB565_WHITE, RGB565_BLACK);
+    tft180_show_string(0, 108, "S1:NEXT S3:OK");
+    tft180_show_string(0, 118, "S3 ON 4:LAUNCH");
+}
+
+/*********************************************************************************************************************
+* 函数名称：Menu_DrawImage
+* 功能说明：二级页面，显示二值化后的图像和中心线
+* 参数说明：无
+* 返回说明：无
+********************************************************************************************************************/
+static void Menu_DrawImage(void)
+{
+    int i;
+
+    // 二值化图像，188x120 缩放到 160x101 显示
+    tft180_show_gray_image(0, 0, image_two_value[0], MT9V03X_W, MT9V03X_H, 160, 101, 1);
+
+    // 中心线换算到屏幕坐标画出来，只画真正扫过的行
+    for(i = MT9V03X_H - 1; i >= MT9V03X_H - Search_Stop_Line; i--)
+        tft180_draw_point(Center_Line[i] * 160 / MT9V03X_W, i * 101 / MT9V03X_H, RGB565_RED);
+
+}
+
+/*********************************************************************************************************************
+* 函数名称：Menu_DrawData
+* 功能说明：二级页面，显示图像数据和各个元素标志
+* 参数说明：无
+* 返回说明：无
+* 备    注：四个拐点显示格式是"行号+列号"，列号取 Left_Line/Right_Line 在该行的值
+********************************************************************************************************************/
+static void Menu_DrawData(void)
+{
+    // 整屏重画；数字用 tft180_show_int 写，它自己会用空格补齐，不会残留旧数字
+    tft180_full(RGB565_BLACK);
+
+    tft180_set_font(TFT180_8X16_FONT);
+    tft180_set_color(RGB565_WHITE, RGB565_BLACK);
+
+    // 左右丢线行数
+    tft180_show_string(0, 0, "LL");
+    tft180_show_int(24, 0, Left_Lost_Time, 3);
+    tft180_show_string(88, 0, "RL");
+    tft180_show_int(112, 0, Right_Lost_Time, 3);
+
+    // 双边丢线行数、搜索截止行
+    tft180_show_string(0, 16, "BL");
+    tft180_show_int(24, 16, Both_Lost_Time, 3);
+    tft180_show_string(72, 16, "SSL");
+    tft180_show_int(104, 16, Search_Stop_Line, 3);
+
+    // 左右边界起始点
+    tft180_show_string(0, 32, "BSL");
+    tft180_show_int(32, 32, Boundry_Start_Left, 3);
+    tft180_show_string(80, 32, "BSR");
+    tft180_show_int(112, 32, Boundry_Start_Right, 3);
+
+    // 左上、右上拐点：行号 + 列号
+    tft180_show_string(0, 48, "LU");
+    tft180_show_int(20, 48, Left_Up_Inflection_Point, 3);
+    tft180_show_int(48, 48, Left_Line[Left_Up_Inflection_Point], 3);
+    tft180_show_string(80, 48, "RU");
+    tft180_show_int(100, 48, Right_Up_Inflection_Point, 3);
+    tft180_show_int(128, 48, Right_Line[Right_Up_Inflection_Point], 3);
+
+    // 左下、右下拐点：行号 + 列号
+    tft180_show_string(0, 64, "LD");
+    tft180_show_int(20, 64, Left_Down_Inflection_Point, 3);
+    tft180_show_int(48, 64, Left_Line[Left_Down_Inflection_Point], 3);
+    tft180_show_string(80, 64, "RD");
+    tft180_show_int(100, 64, Right_Down_Inflection_Point, 3);
+    tft180_show_int(128, 64, Right_Line[Right_Down_Inflection_Point], 3);
+
+    // 环岛状态、十字标志、坡道标志
+    tft180_show_string(0, 80, "IS");
+    tft180_show_int(20, 80, Island_State, 2);
+    tft180_show_string(48, 80, "CR");
+    tft180_show_int(68, 80, Cross_Flag, 2);
+    tft180_show_string(96, 80, "RP");
+    tft180_show_int(116, 80, Ramp_Flag, 2);
+
+    // 斑马线标志、二值化阈值
+    tft180_show_string(0, 96, "ZB");
+    tft180_show_int(20, 96, Zebra_Flag, 2);
+    tft180_show_string(48, 96, "TH");
+    tft180_show_int(68, 96, threshold, 3);
+
+    // 中线误差
+    tft180_show_string(0, 112, "ERR");
+    tft180_show_float(32, 112, Err, 5, 1);
+}
+
+/*********************************************************************************************************************
+* 函数名称：Menu_Init
+* 功能说明：初始化菜单
+* 参数说明：无
+* 返回说明：无
+********************************************************************************************************************/
+void Menu_Init(void)
+{
+    // 按键用库里的驱动：扫描周期1ms，10次采样就是10ms，点一下就能认
+    key_init(1);
+    key_clear_all_state();
+
+    // CCU60_CH0 定时器 1ms 中断里调用 key_scanner()，主循环画屏再慢也不会漏按键
+    // CPU0默认没有开全局中断，这里一定要打开，否则定时器中断不会进来
+    interrupt_global_enable(0);
+    pit_ms_init(CCU60_CH0, 1);
+
+    // 上电默认停在一级菜单，选到 4 START 按 S3 才发车
+    menu_page    = 1;
+    race_started = 0;
+    menu_sub    = MENU_SUB_LIST;
+    menu_cursor = 0;
+    menu_dirty  = 1;
+    menu_item   = MENU_ITEM_P;
+
+    // 默认字体和颜色
+    tft180_set_font(TFT180_8X16_FONT);
+    tft180_set_color(RGB565_WHITE, RGB565_BLACK);
+}
+
+/*********************************************************************************************************************
+* 函数名称：Menu_DrawStop
+* 功能说明：画停车提示画面（从菜单返回运行页面时用，这时还没发车，车不会动）
+* 参数说明：无
+* 返回说明：无
+********************************************************************************************************************/
+static void Menu_DrawStop(void)
+{
+    tft180_full(RGB565_BLACK);
+
+    tft180_set_font(TFT180_8X16_FONT);
+    tft180_set_color(RGB565_YELLOW, RGB565_BLACK);
+    tft180_show_string(56, 48, "STOP");
+
+    tft180_set_font(TFT180_6X8_FONT);
+    tft180_set_color(RGB565_WHITE, RGB565_BLACK);
+    tft180_show_string(52, 96, "S4:MENU");
+}
+
+/*********************************************************************************************************************
+* 函数名称：Menu_Update
+* 功能说明：菜单按键处理。S4 在整个菜单里统一当“返回”用，只切界面、绝不会发车
+* 参数说明：无
+* 返回说明：无
+* 备    注：运行页 S4进菜单；菜单里 S4返回（二级页面->一级菜单，一级菜单->运行页）；
+*           一级菜单 S1移动光标 S3确定（选到4 START就是发车）；调参页 S1切换 S2减小 S3增大
+********************************************************************************************************************/
+void Menu_Update(void)
+{
+    // 运行页面：S4进入菜单
+    if(menu_page == 0)
+    {
+        if(Menu_KeyEvent(KEY_4))
+        {
+            menu_page    = 1;
+            menu_sub     = MENU_SUB_LIST;
+            menu_cursor  = 0;
+            menu_dirty   = 1;
+            race_started = 0;               // 进菜单就收车，要重新发车才会跑
+        }
+        return;
+    }
+
+    // 菜单里 S4 统一当返回键，写在最前面，任何页面都能出来
+    // 一级菜单按S4 -> 回运行页面（不发车，车停着）
+    // 二级页面按S4 -> 回一级菜单
+    if(Menu_KeyEvent(KEY_4))
+    {
+        if(menu_sub == MENU_SUB_LIST)
+        {
+            menu_page  = 0;
+            menu_dirty = 0;
+            Menu_DrawStop();
+        }
+        else
+        {
+            menu_sub   = MENU_SUB_LIST;
+            menu_dirty = 1;
+        }
+        return;
+    }
+
+    // 一级菜单：S1移动光标，S3确定
+    if(menu_sub == MENU_SUB_LIST)
+    {
+        if(Menu_KeyEvent(KEY_1))
+        {
+            menu_cursor++;
+            if(menu_cursor > 3)
+                menu_cursor = 0;
+            menu_dirty = 1;
+        }
+
+        if(Menu_KeyEvent(KEY_3))
+        {
+            if(menu_cursor == 0)
+                menu_sub = MENU_SUB_IMAGE;
+            else if(menu_cursor == 1)
+                menu_sub = MENU_SUB_PARAM;
+            else if(menu_cursor == 2)
+                menu_sub = MENU_SUB_DATA;
+            else
+                menu_sub = MENU_SUB_START;
+            menu_dirty = 1;
+        }
+
+        if(menu_dirty)
+        {
+            menu_dirty = 0;
+            Menu_DrawLevel1();
+        }
+    }
+    // 二级页面：二值化图像（只有S4返回，画面按帧刷新）
+    else if(menu_sub == MENU_SUB_IMAGE)
+    {
+        if(new_frame_flag)
+        {
+            new_frame_flag = 0;
+
+            // 电机不转，但舵机照常跟着巡线走，方便用手推着车观察转向
+            pwm_set_duty(SERVO_MOTOR_PWM, PD_Camera(Err));
+
+            menu_refresh_cnt++;
+            if(menu_dirty || menu_refresh_cnt >= MENU_REFRESH_DIV)
+            {
+                menu_dirty       = 0;
+                menu_refresh_cnt = 0;
+                Menu_DrawImage();
+            }
+        }
+    }
+    // 二级页面：参数调整
+    else if(menu_sub == MENU_SUB_PARAM)
+    {
+        if(Menu_KeyEvent(KEY_1))
+        {
+            menu_item++;
+            if(menu_item >= MENU_ITEM_COUNT)
+                menu_item = MENU_ITEM_P;
+            menu_dirty = 1;
+        }
+
+        if(Menu_KeyEvent(KEY_2))
+            Menu_Adjust(-1);
+
+        if(Menu_KeyEvent(KEY_3))
+            Menu_Adjust(1);
+
+        if(menu_dirty)
+        {
+            menu_dirty = 0;
+            Menu_Draw();
+        }
+    }
+    // 二级页面：图像数据（只有S4返回，数据按帧刷新）
+    else if(menu_sub == MENU_SUB_DATA)
+    {
+        if(new_frame_flag)
+        {
+            new_frame_flag = 0;
+
+            // 电机不转，但舵机照常跟着巡线走，方便用手推着车观察转向
+            pwm_set_duty(SERVO_MOTOR_PWM, PD_Camera(Err));
+
+            menu_refresh_cnt++;
+            if(menu_dirty || menu_refresh_cnt >= MENU_REFRESH_DIV)
+            {
+                menu_dirty       = 0;
+                menu_refresh_cnt = 0;
+                Menu_DrawData();
+            }
+        }
+    }
+    // 发车页面：倒计时，停够裁判要求的时间后自动发车
+    else
+    {
+        tft180_full(RGB565_BLACK);
+        tft180_set_font(TFT180_8X16_FONT);
+        tft180_set_color(RGB565_CYAN, RGB565_BLACK);
+        tft180_show_string(60, 32, "START");
+        tft180_set_color(RGB565_WHITE, RGB565_BLACK);
+        tft180_show_string(76, 64, "2");
+
+        system_delay_ms(MENU_START_DELAY_MS / 2);
+        tft180_show_string(76, 64, "1");
+        system_delay_ms(MENU_START_DELAY_MS / 2);
+
+        // 停顿结束：清按键状态、清出界标志、清斑马线标志、帧计数器归零，然后置发车标志
+        key_clear_all_state();
+        out_of_track_flag = 0;
+        zebra_run_frame   = 0;              // 从发车这一刻开始数帧，方便计时（50帧≈1秒）
+        Zebra_Flag        = 0;              // 清掉在菜单里误认的斑马线，不然一发车就停
+        race_started      = 1;
+
+        tft180_full(RGB565_BLACK);
+        tft180_set_font(TFT180_8X16_FONT);
+        tft180_set_color(RGB565_CYAN, RGB565_BLACK);
+        tft180_show_string(68, 56, "RUN");
+        tft180_set_font(TFT180_6X8_FONT);
+        tft180_set_color(RGB565_WHITE, RGB565_BLACK);
+        tft180_show_string(56, 100, "S4:MENU");
+
+        menu_page  = 0;
+        menu_dirty = 1;
+    }
+}
+
+/*********************************************************************************************************************
+* 函数名称：Menu_GetKp
+* 功能说明：返回菜单中的P参数
+* 参数说明：无
+* 返回说明：当前P参数
+********************************************************************************************************************/
+float Menu_GetKp(void)
+{
+    return menu_kp;
+}
+
+/*********************************************************************************************************************
+* 函数名称：Menu_GetKd
+* 功能说明：返回菜单中的D参数
+* 参数说明：无
+* 返回说明：当前D参数
+********************************************************************************************************************/
+float Menu_GetKd(void)
+{
+    return menu_kd;
+}
+
+/*********************************************************************************************************************
+* 函数名称：Menu_GetMotorPwm
+* 功能说明：返回菜单中的电机PWM
+* 参数说明：无
+* 返回说明：左右电机基础PWM
+********************************************************************************************************************/
+int Menu_GetMotorPwm(void)
+{
+    return menu_motor_pwm;
+}

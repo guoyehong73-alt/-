@@ -1,0 +1,146 @@
+/*********************************************************************************************************************
+* TC264 Opensourec Library 即（TC264 开源库）是一个基于官方 SDK 接口的第三方开源库
+* Copyright (c) 2022 SEEKFREE 逐飞科技
+*
+* 本文件是 TC264 开源库的一部分
+*
+* TC264 开源库 是免费软件
+* 您可以根据自由软件基金会发布的 GPL（GNU General Public License，即 GNU通用公共许可证）的条款
+* 即 GPL 的第3版（即 GPL3.0）或（您选择的）任何后来的版本，重新发布和/或修改它
+*
+* 本开源库的发布是希望它能发挥作用，但并未对其作任何的保证
+* 甚至没有隐含的适销性或适合特定用途的保证
+* 更多细节请参见 GPL
+*
+* 您应该在收到本开源库的同时收到一份 GPL 的副本
+* 如果没有，请参阅<https://www.gnu.org/licenses/>
+*
+* 额外注明：
+* 本开源库使用 GPL3.0 开源许可证协议 以上许可申明为译文版本
+* 许可申明英文版在 libraries/doc 文件夹下的 GPL3_permission_statement.txt 文件中
+* 许可证副本在 libraries 文件夹下 即该文件夹下的 LICENSE 文件
+* 欢迎各位使用并传播本程序 但修改内容时必须保留逐飞科技的版权声明（即本声明）
+*
+* 文件名称          cpu1_main
+* 公司名称          成都逐飞科技有限公司
+* 版本信息          查看 libraries/doc 文件夹内 version 文件 版本说明
+* 开发环境          ADS v1.10.2
+* 适用平台          TC264D
+* 店铺链接          https://seekfree.taobao.com/
+*
+* 修改记录
+* 日期              作者                备注
+* 2022-09-15       pudding            first version
+********************************************************************************************************************/
+
+#include "zf_common_headfile.h"
+#pragma section all "cpu1_dsram"
+// 将本语句与#pragma section all restore语句之间的全局变量都放在CPU1的RAM中
+
+// **************************** 代码区域 ****************************
+
+// 本例程是开源库空工程 可用作移植或者测试各类内外设
+// 本例程是开源库空工程 可用作移植或者测试各类内外设
+// 本例程是开源库空工程 可用作移植或者测试各类内外设
+
+void core1_main(void)
+{
+    disable_Watchdog();                     // 关闭看门狗
+    interrupt_global_enable(0);             // 打开全局中断
+    // 此处编写用户代码 例如外设初始化代码等
+    mt9v03x_init();
+    mt9v03x_set_exposure_time(512);         //设置曝光时长，括号内参数自行根据情况修改
+
+    // 此处编写用户代码 例如外设初始化代码等
+    cpu_wait_event_ready();                 // 等待所有核心初始化完毕
+    while (TRUE)
+    {
+        // 此处编写需要循环执行的代码
+
+// memcpy(base_image[0],mt9v03x_image[0], MT9V03X_IMAGE_SIZE);
+        volatile uint8 mt9v03x_finish_flag = 0;   // 一场图像采集完成标志位
+        uint8 mt9v03x_image[MT9V03X_H][MT9V03X_W];//采集到的图像数据
+//uint8 base_image[MT9V03X_H][MT9V03X_W];//备份图像数据
+
+//uint8 Threshold=0;
+ uint8 Threshold = 0; //阈值
+ uint8 bin_image[image_h][image_w]={0};
+ int extra_threshold =0;
+
+int  otsuThreshold(uint8 *image, uint16 width, uint16 height, uint16 height_start)
+{
+    int16_t i,j;
+    uint32_t Amount = 0;
+    uint32_t PixelBack = 0;
+    uint32_t PixelIntegralBack = 0;
+    uint32_t PixelIntegral = 0;
+    int32_t PixelIntegralFore = 0;
+    int32_t PixelFore = 0;
+    float OmegaBack, OmegaFore, MicroBack, MicroFore, SigmaB, Sigma; // 类间方差;
+    int16_t MinValue, MaxValue;
+
+    uint8 HistoGram[256]={0};//灰度直方图
+
+   // for (j = 0; (j < start_line) && (j> (start_line+ number_line)) && (j < height) ; j++)
+
+//     image_threshold_1 = otsuThreshold(mt9v03x_image[0],MT9V03X_W, start_line ,0 );     //先计算阈值
+//            image_threshold_2 = otsuThreshold(mt9v03x_image[0],MT9V03X_W, MT9V03X_H,start_line);
+          for (j = height_start; j < height ; j++)
+
+    {
+        for (i = 0; i < width; i++)
+        {
+            HistoGram[mt9v03x_image[j][i]]++; //统计灰度级中每个像素在整幅图像中的个数
+
+        }
+    }
+    for (MinValue = 0; MinValue < 256 && HistoGram[MinValue] == 0; MinValue++) ;        //获取最小灰度的值
+    for (MaxValue = 255; MaxValue > MinValue && HistoGram[MinValue] == 0; MaxValue--); //获取最大灰度的值
+
+    if (MaxValue == MinValue)     return MaxValue;         // 图像中只有一个颜色
+    if (MinValue + 1 == MaxValue)  return MinValue;        // 图像中只有二个颜色
+
+    for (j = MinValue; j <= MaxValue; j++)    Amount += HistoGram[j];        //  像素总数
+
+    PixelIntegral = 0;
+    for (j = MinValue; j <= MaxValue; j++)
+    {
+        PixelIntegral += HistoGram[j] * j;//灰度值总数
+    }
+    SigmaB = -1;
+    for (j = MinValue; j < MaxValue; j++)
+    {
+        PixelBack = PixelBack + HistoGram[j];    //前景像素点数
+        PixelFore = Amount - PixelBack;         //背景像素点数
+        OmegaBack = (float)PixelBack / Amount;//前景像素百分比
+        OmegaFore = (float)PixelFore / Amount;//背景像素百分比
+        PixelIntegralBack += HistoGram[j] * j;  //前景灰度值
+        PixelIntegralFore = PixelIntegral - PixelIntegralBack;//背景灰度值
+        MicroBack = (float)PixelIntegralBack / PixelBack;   //前景灰度百分比
+        MicroFore = (float)PixelIntegralFore / PixelFore;   //背景灰度百分比
+        Sigma = OmegaBack * OmegaFore * (MicroBack - MicroFore) * (MicroBack - MicroFore);//计算类间方差
+        if (Sigma > SigmaB)                    //遍历最大的类间方差g //找出最大类间方差以及对应的阈值
+        {
+
+            SigmaB = Sigma;
+            Threshold = j;
+
+        }
+    }
+    Threshold=Threshold+extra_threshold;
+    return Threshold;
+}
+
+        if(mt9v03x_finish_flag)//先处理图像，再清除标志位
+        {
+            Threshold=My_Adapt_Threshold(mt9v03x_image[0],MT9V03X_W, MT9V03X_H);//大津算阈值
+            Image_Binarization(Threshold);//图像二值化
+            mt9v03x_finish_flag=0;//标志位清除
+        }
+
+
+        // 此处编写需要循环执行的代码
+    }
+}
+#pragma section all restore
+// **************************** 代码区域 ****************************

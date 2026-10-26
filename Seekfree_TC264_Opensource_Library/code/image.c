@@ -164,7 +164,7 @@ void XunXian(void)
     //环岛3状态需要改变最长白列寻找范?
     if(Right_Island_Flag==1)//右环
     {
-        if(Island_State==3)
+        if((Island_State==3)||(Island_State==4))
         {
             start_column=40;
             end_column=MT9V03X_W-20;
@@ -172,7 +172,7 @@ void XunXian(void)
     }
     else if(Left_Island_Flag==1)//左环
     {
-        if(Island_State==3)
+        if((Island_State==3)||(Island_State==4))
         {
             start_column=20;
             end_column=MT9V03X_W-40;
@@ -228,10 +228,10 @@ void XunXian(void)
 
     if (Island_State == 3)
     {
-        int target_column = 50;                             //左环固定取第50列
+        int target_column = 45;                             //左环固定取第50列
         if(Right_Island_Flag==1)
         {
-            target_column = MT9V03X_W - 1 - 50;             //右环取左环镜像列
+            target_column = MT9V03X_W - 1 - 45;             //右环取左环镜像列
         }
         Longest_White_Column_Right[0] = Longest_White_Column_Left[0] = White_Column[target_column];
         Longest_White_Column_Left[1]  = target_column;
@@ -320,7 +320,7 @@ void Straight_Detect(void)
     Err=Err_Sum();
     if(Search_Stop_Line>=110)//截止行很大，很远
     {
-        if(Boundry_Start_Left>=105&&Boundry_Start_Right>=105)//起始点靠?
+        if(Boundry_Start_Left>=105&&Boundry_Start_Right>=105)//起始点靠下
         {
             if(-5<=Err&&Err<=5)//误差很小
             {
@@ -920,7 +920,7 @@ void Zebra_Detect(void)
         zebra_confirm=0;
     }
 
-    if(zebra_confirm>=3)
+    if(zebra_confirm>=6)
     {
         Zebra_Flag=1;                 //连续3帧满足再认斑马线，降低误判
     }

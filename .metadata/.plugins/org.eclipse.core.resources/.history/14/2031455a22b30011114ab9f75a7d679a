@@ -1,0 +1,16 @@
+/*
+ * image.h
+ *
+ *  Created on: 2026年9月16日
+ *      Author: Guoyehong6
+ */
+
+#ifndef CODE_IMAGE_H_
+#define CODE_IMAGE_H_
+
+#include "zf_common_headfile.h"
+
+#define IMG_BLACK     0X00      //0x00是黑
+#define IMG_WHITE     0Xff      //0xff为白
+
+#endif /* CODE_IMAGE_H_ */

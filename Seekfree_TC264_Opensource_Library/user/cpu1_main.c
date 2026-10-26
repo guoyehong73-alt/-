@@ -49,16 +49,49 @@ void core1_main(void)
     interrupt_global_enable(0);             // 打开全局中断
     // 此处编写用户代码 例如外设初始化代码等
     mt9v03x_init();
-    mt9v03x_set_exposure_time(120);         //设置曝光时长，括号内参数自行根据情况修改
 
     // 此处编写用户代码 例如外设初始化代码等
     cpu_wait_event_ready();                 // 等待所有核心初始化完毕
+
+    // CPU0在Menu_Init中从Flash恢复档案，这里必须等档案加载完成后再下发摄像头参数
+    mt9v03x_set_fps((uint16)menu_fps);
+    mt9v03x_set_exposure_time((uint16)menu_exposure);
+
+    // 记录当前已经下发的配置，菜单变化时才重新设置
+    int last_exposure = menu_exposure;
+    int last_fps = menu_fps;
+
     while (TRUE)
     {
         // 此处编写需要循环执行的代码
 
         if(mt9v03x_finish_flag)//先处理图像，再清除标志位
         {
+            // CPU0在菜单里改帧率或曝光度，CPU1每帧检查一次，变化后重新设置摄像头
+            {
+                int fps_now = menu_fps;
+                int exposure_now = menu_exposure;
+
+                if(fps_now != last_fps)
+                {
+                    if(mt9v03x_set_fps((uint16)fps_now) == 0)
+                    {
+                        last_fps = fps_now;
+                        last_exposure = -1;
+                    }
+                    else
+                    {
+                        menu_fps = last_fps;
+                    }
+                }
+
+                if(exposure_now != last_exposure)
+                {
+                    mt9v03x_set_exposure_time((uint16)exposure_now);
+                    last_exposure = exposure_now;
+                }
+            }
+
             threshold=My_Adapt_Threshold(mt9v03x_image[0],MT9V03X_W, MT9V03X_H);//大津算阈值
             Image_Binarization(threshold);//图像二值化
 

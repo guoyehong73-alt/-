@@ -1,0 +1,27 @@
+/*
+ * Motor.h
+ *
+ *  Created on: 2026Äê9ÔÂ26ÈÕ
+ *      Author: Guoyehong6
+ */
+
+#ifndef CODE_MOTOR_H_
+#define CODE_MOTOR_H_
+
+#include "zf_common_headfile.h"
+
+#define  MotorL_pwm    ATOM1_CH1_P21_3
+#define  MotorL_turn   (P21_4)
+
+#define  MotorR_pwm    ATOM1_CH3_P21_5
+#define  MotorR_turn   (P21_6)
+
+#define SPEED_MAX  4000
+#define SPEED_MIN  -4000
+
+void Motor_Init(void);
+void MotorL_Set_Speed(int pwm);
+void MotorR_Set_Speed(int pwm);
+int Motor_PD(float err);
+
+#endif /* CODE_MOTOR_H_ */

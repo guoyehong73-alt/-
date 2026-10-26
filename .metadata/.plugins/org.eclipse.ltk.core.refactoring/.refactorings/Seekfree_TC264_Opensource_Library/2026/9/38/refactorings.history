@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<session version="1.0">
+<refactoring comment="Rename resource &apos;Seekfree_TC264_Opensource_Library/code/led_breathing,h&apos; to &apos;led_breathing.h&apos;" description="Rename resource &apos;led_breathing,h&apos;" flags="7" id="org.eclipse.ltk.core.refactoring.rename.resource" input="code/led_breathing,h" name="led_breathing.h" stamp="1789367872083" updateReferences="true"/>
+</session>

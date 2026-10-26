@@ -1,0 +1,61 @@
+/*
+ * image.h
+ *
+ *  Created on: 2026年9月16日
+ *      Author: Guoyehong6
+ */
+
+#ifndef CODE_IMAGE_H_
+#define CODE_IMAGE_H_
+
+#include "zf_common_headfile.h"
+
+#define IMG_BLACK     0X00      //0x00是黑
+#define IMG_WHITE     0Xff      //0xff为白
+
+int My_Adapt_Threshold(uint8 *image, uint16 width, uint16 height);
+void Image_Binarization(int threshold);
+void XunXian(void);
+void Straight_Detect(void);
+int Find_Left_Up_Inflection_Point(int start, int end);
+int Find_Right_Up_Inflection_Point(int start, int end);
+int Find_Left_Down_Inflection_Point(int start,int end);
+int Find_Right_Down_Inflection_Point(int start,int end);
+void Find_Up_Inflection_Point(int start,int end);
+void Find_Down_Inflection_Point(int start, int end);
+
+void Cross_Detect(void);
+void Zebra_Detect(void);
+void Left_Add_Line(int x1,int y1,int x2,int y2);
+void Right_Add_Line(int x1,int y1,int x2,int y2);
+void Lengthen_Left_Boundry(int start,int end);
+void Lengthen_Right_Boundry(int start,int end);
+
+extern volatile uint8 new_frame_flag;
+extern uint8 base_image[MT9V03X_H][MT9V03X_W];
+extern uint8 image_two_value[MT9V03X_H][MT9V03X_W];
+extern int threshold;
+extern int Longest_White_Column_Left[2] ;
+extern int Longest_White_Column_Right[2] ;
+extern volatile int Search_Stop_Line ;
+extern int Right_Lost_Flag[MT9V03X_H] ;
+extern int Left_Lost_Flag[MT9V03X_H] ;
+extern volatile int Left_Line[MT9V03X_H] ;
+extern volatile int Right_Line[MT9V03X_H] ;
+extern volatile int Left_Lost_Time,Right_Lost_Time,Both_Lost_Time;
+extern volatile int White_Column[MT9V03X_W];//每列白列长度
+extern int Road_Wide[MT9V03X_H];
+extern int Center_Line[MT9V03X_H];
+extern int Boundry_Start_Left,Boundry_Start_Right;
+extern volatile int Island_State;         // 环岛状态
+extern volatile int Ramp_Flag;              // 坡道标志
+extern volatile int Cross_Flag;             // 十字标志
+extern volatile uint8 Straight_Flag;      //直道标志
+extern int Zebra_Flag;                             //斑马线标志
+extern uint16 zebra_run_frame;                     // 帧计数器，可用来计时
+extern int Left_Up_Inflection_Point;                // 左上拐点行号，0=未找到
+extern int Right_Up_Inflection_Point;               // 右上拐点行号，0=未找到
+extern int Left_Down_Inflection_Point;              // 左下拐点行号，0=未找到
+extern int Right_Down_Inflection_Point;             // 右下拐点行号，0=未找到
+
+#endif /* CODE_IMAGE_H_ */

@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智能车 PD 调参手册</title>
+<style>
+  :root { --ink:#1a1a1a; --muted:#666; --line:#e2e2e2; --bg:#fafaf7; --card:#fff;
+          --blue:#185fa5; --blue-bg:#e6f1fb; --red:#a32d2d; --red-bg:#fcebeb;
+          --green:#27500a; --green-bg:#eaf3de; --amber:#854f0b; --amber-bg:#faeeda; }
+  * { box-sizing:border-box; }
+  body { font-family:"Microsoft YaHei","PingFang SC",sans-serif; color:var(--ink);
+         background:var(--bg); margin:0; padding:20px 16px 60px; line-height:1.7; font-size:15px; }
+  .wrap { max-width:860px; margin:0 auto; }
+  h1 { font-size:24px; border-bottom:3px solid var(--ink); padding-bottom:10px; }
+  h2 { font-size:19px; margin-top:2.2em; background:var(--ink); color:#fff;
+       padding:6px 14px; border-radius:6px; }
+  h3 { font-size:16px; margin-top:1.6em; }
+  table { border-collapse:collapse; width:100%; margin:12px 0; background:var(--card); }
+  th,td { border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top; font-size:14px; }
+  th { background:#f0efe9; }
+  code { background:#efede6; padding:1px 6px; border-radius:4px; font-size:13px; font-family:Consolas,monospace; }
+  .box { border-radius:10px; padding:14px 16px; margin:14px 0; }
+  .b-blue { background:var(--blue-bg); border-left:4px solid var(--blue); }
+  .b-red { background:var(--red-bg); border-left:4px solid var(--red); }
+  .b-green { background:var(--green-bg); border-left:4px solid var(--green); }
+  .b-amber { background:var(--amber-bg); border-left:4px solid var(--amber); }
+  .tag { display:inline-block; font-size:12px; padding:1px 8px; border-radius:10px; margin-right:4px; }
+  .t-red { background:var(--red-bg); color:var(--red); }
+  .t-green { background:var(--green-bg); color:var(--green); }
+  .t-amber { background:var(--amber-bg); color:var(--amber); }
+  .toc { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px 20px; }
+  .toc a { color:var(--blue); text-decoration:none; }
+  .formula { background:#f4f2ec; border:1px dashed #bbb; border-radius:8px;
+             padding:10px 14px; font-family:Consolas,monospace; font-size:14px; margin:10px 0; overflow-x:auto; }
+  li { margin-bottom:4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>智能车 PD 调参手册</h1>
+<p style="color:var(--muted)">适配：TC264 · 总电钻车模 · 摄像头巡线 · 逐飞开源库框架<br>
+对应代码：<code>PID.c → PD_Camera()</code>，参数在菜单 PARAM 页调</p>
+
+<div class="toc">
+<b>目录</b><br>
+1. <a href="#s1">先搞懂：P 和 D 到底在干什么</a><br>
+2. <a href="#s2">现象 → 参数 对照表（最常用，贴墙上）</a><br>
+3. <a href="#s3">标准调参流程（十步法）</a><br>
+4. <a href="#s4">调参铁律（违反必翻车）</a><br>
+5. <a href="#s5">记录表模板</a><br>
+6. <a href="#s6">提速专项：速度和 P/D 的关系</a><br>
+7. <a href="#s7">环岛专项（ISP / ISD）</a><br>
+8. <a href="#s8">差速专项（Kdiff）</a><br>
+9. <a href="#s9">数学模型速查</a><br>
+10. <a href="#s10">新手常犯的错</a><br>
+11. <a href="#s11">黑话词典</a>
+</div>
+
+<h2 id="s1">1. 先搞懂：P 和 D 到底在干什么</h2>
+<p>把开车想象成你妈让你把车停进车位：</p>
+<table>
+<tr><th></th><th>一句话</th><th>你车上的体现</th></tr>
+<tr><td><b>P（比例）</b></td><td>现在偏了多少，就打多少角</td><td>偏 20 个像素 × P=1.9 = 打 38 个单位的角度。P 是<b>主力</b>，没有它车不转弯</td></tr>
+<tr><td><b>D（微分）</b></td><td>偏离得越来越快，就提前多打一点</td><td>看的是"这一帧比上一帧多偏了多少"。P 冲过头之前踩刹车</td></tr>
+</table>
+<div class="box b-blue">
+<b>只有 P 的车</b>：像喝多的人走路，永远在赛道左右两边来回撞（震荡）。<br>
+<b>P + 合适 D</b>：平稳收敛到中线。<br>
+<b>D 太大</b>：神经质，误差数字稍微一抖它就猛打舵（高频抖动）。
+</div>
+
+<h2 id="s2">2. 现象 → 参数 对照表</h2>
+<p>调参 90% 的时间就是对着这张表查：</p>
+<table>
+<tr><th>看到的现象</th><th>诊断</th><th>怎么动</th></tr>
+<tr><td><span class="tag t-red">直道画龙</span> 车头左右摆，走 S 形</td><td>P 太大（修过头），或 D 太小（收不住）</td><td><b>先退 P</b>，退到不画龙；还摆就加 D</td></tr>
+<tr><td><span class="tag t-red">弯道外冲</span> 车往外飞、压边线出界</td><td>P 太小（打角不够快不够狠）</td><td>加大 P，或降速</td></tr>
+<tr><td><span class="tag t-amber">舵机打满了还出弯</span></td><td>不是 P 的事了，是速度超过过弯极限</td><td>降速，或上差速</td></tr>
+<tr><td><span class="tag t-amber">慢摆</span> 直道大幅度、慢悠悠左右晃</td><td>D 太小，超调收不住</td><td>加 D</td></tr>
+<tr><td><span class="tag t-red">高频抖 / 筛糠</span> 车身细碎快速哆嗦</td><td>D 太大，放大了误差噪声</td><td>减 D</td></tr>
+<tr><td><span class="tag t-amber">反应迟钝</span> 打角慢半拍、弯里Lazy</td><td>D 太大（过阻尼）或 P 小</td><td>减 D 优先，再考虑加 P</td></tr>
+<tr><td>直道很稳，一进弯就完蛋</td><td>P 不够 + 速度太快</td><td>加 P；P 加不动就降速</td></tr>
+<tr><td>直道弯道都稳，就是慢</td><td>参数还有余量</td><td>提速，按第 6 节流程</td></tr>
+</table>
+<div class="box b-green">
+<b>记忆口诀：</b>画龙退 P · 外冲加 P · 慢摆加 D · 筛糠减 D。<br>
+方向不确定时：P 管"打得够不够狠"，D 管"收得住收不住"。
+</div>
+
+<h2 id="s3">3. 标准调参流程（十步法）</h2>
+<div class="box b-amber">
+前提：DATA 页能正常显示 Err / IS / GY；电机基础 PWM 先调到低速档（1200 左右）。
+</div>
+<ol>
+<li><b>推车验证</b>：进 IMAGE 页，电机不转，用手推车沿赛道走，看屏幕上的红色中线跟不跟得住、舵机会不会随偏移打角。<b>跟不住就是巡线/补线的问题，先修代码再调参</b>。</li>
+<li><b>低速发车</b>：PWM=1200，P 用当前值，D 先给 P 的一半左右（比如 P=1.9 → D=1.0）。</li>
+<li><b>观察直道</b>：画龙 → 退 P；不画龙 → 进入下一步。</li>
+<li><b>找 P 的画龙临界</b>：每次 +0.1 加 P，直到直道开始出现轻微摆动，然后<b>退回 20~30%</b>。这就是当前速度的最佳 P。</li>
+<li><b>调 D</b>：D 从小往上加（步长 0.2），直到慢摆消失、又还没出现高频抖。取两者中间。</li>
+<li><b>跑弯道</b>：外冲 → 加 P（回到步骤 4 重新确认临界）；打满舵还出弯 → 降速。</li>
+<li><b>提速一档</b>：PWM +200~300。</li>
+<li><b>重复 3~6</b>。提速后 P 先保持不动试跑，画龙再退，外冲再加。</li>
+<li><b>环岛专项</b>：跑通后按第 7 节调 ISP/ISD。</li>
+<li><b>记录</b>：每一档速度的最终参数写进第 5 节的表里。比赛前按赛道直弯比例微调。</li>
+</ol>
+
+<h2 id="s4">4. 调参铁律</h2>
+<div class="box b-red">
+<b>① 一次只改一个参数。</b>同时改 P 和 D，出了问题你永远不知道是谁的锅。<br>
+<b>② 改之前记下原值。</b>改崩了能一键回滚。<br>
+<b>③ 每趟跑完写记录。</b>不记录 = 白调，两周后你什么都不记得。<br>
+<b>④ 低速调好再提速。</b>低速都画龙的车上高速只有上天。<br>
+<b>⑤ 现象决定方向，不靠猜。</b>对着第 2 节的表查，表上没有的现象记下来问。<br>
+<b>⑥ 每次改完跑同一条赛道同一段。</b>场地变量都不控制，参数结论全是噪声。<br>
+<b>⑦ 电池满电调出的参数，亏电时未必成立。</b>比赛前在亏电状态复验一遍。
+</div>
+
+<h2 id="s5">5. 记录表模板（抄到 Notion）</h2>
+<table>
+<tr><th>日期</th><th>基础PWM</th><th>P</th><th>D</th><th>Kdiff</th><th>现象</th><th>结论/下一步</th></tr>
+<tr><td>10.17</td><td>1200</td><td>1.9</td><td>1.0</td><td>–</td><td>直道稳，缓弯OK，急弯外冲</td><td>P→2.2 试</td></tr>
+<tr><td>10.17</td><td>1200</td><td>2.2</td><td>1.0</td><td>–</td><td>急弯OK，直道轻微摆</td><td>P 回 2.0，D→1.4</td></tr>
+</table>
+<p>两周期满你回头看，会发现自己进步了多少。</p>
+
+<h2 id="s6">6. 提速专项：速度和 P/D 的关系</h2>
+<div class="box b-blue">
+<b>核心认知：车速本身会放大 P 的作用。</b>物理上打同样的角，车速翻倍，横移速度也翻倍，
+所以<b>提速后 P 的第一反应是"收着点"，不是"跟上加"</b>。
+</div>
+<ul>
+<li>响应速度 ωn 随 v 涨：<code class="formula">ωn = v·√(gkP/L)</code> —— 速度越快，同样的 P 响应越激进</li>
+<li>ωn 有天花板（摄像头延迟 + 舵机延迟 ≈ 150ms → ωn ≤ 4 rad/s 左右），撞顶 = 画龙</li>
+<li>D/P 比值随速度<b>收窄</b>：低速 1.5 左右 → 中速 1.0 → 高速 0.6 甚至更低</li>
+<li>降 P 会导致弯道外冲怎么办？—— 这才是差速 Kdiff 登场的时机：用差速补弯道，而不是无脑加 P</li>
+</ul>
+
+<h2 id="s7">7. 环岛专项（ISP / ISD）</h2>
+<ol>
+<li>先把 ISP、ISD 设成和主 P、D <b>一模一样</b>，跑通环岛再说。</li>
+<li><b>入环瞬间猛甩一下</b> → 补线让误差瞬间阶跃，D 项踢腿 → 降 ISD。</li>
+<li><b>环里画龙</b> → 降 ISP。<b>环里压环岛边线</b> → 加 ISP。</li>
+<li>环岛车速比直道低，模型上能撑更大的增益，所以 ISP/ISD 最终往往比主参数<b>大 1.5~2 倍</b>，从 1.5 倍起步往上试。</li>
+<li>出环相关的是状态机的事（Yaw 差 335°），参数调不好出环去查 <code>Island.c</code>，别死调参。</li>
+</ol>
+
+<h2 id="s8">8. 差速专项（Kdiff）</h2>
+<ul>
+<li>公式：<code class="formula">diff = Kdiff × (舵机输出 − 625)</code>，左轮 = base − diff，右轮 = base + diff</li>
+<li>起点：模型算出 ≈2.8，从 <b>2.5~3.0</b> 开始</li>
+<li><b>弯里推头</b> → 加 Kdiff；<b>直道开始晃</b> → 减 Kdiff（直道舵机偏移≈0，天然影响小）</li>
+<li>给 diff 加上限 ±400，防止急弯内轮被减成反转</li>
+<li>差速是弯道补强，直道稳不稳还是看 P/D，别指望差速救直道</li>
+</ul>
+
+<h2 id="s9">9. 数学模型速查</h2>
+<div class="formula">
+自行车模型：δ 前轮角，L 轴距，v 车速<br>
+转弯半径 R = L / tan(δ)                    —— 过弯需要的打角只看弯的几何，与速度无关<br>
+闭环：ë = -(gv²k/L)(Pe + D·ė)              —— 物理增益自带 v² 因子<br>
+ωn = v·√(gkP/L)                            —— P 决定修正快慢<br>
+ζ  = D·√(gk)/(2√(PL))                      —— D 决定阻尼（震荡倾向）<br>
+目标：ζ ≈ 0.7~0.9（轻微超调），ωn ≤ 0.65/τ（延迟限制）<br>
+D/P = 2ζ/ωn                                 —— 比值随速度收窄，不是常数
+</div>
+<ul>
+<li>理论 Kdiff = base × d × k / (2L)，代入本车 ≈ 2.8</li>
+<li>模型给<b>方向和量级</b>，最终值以赛道实验为准</li>
+<li>模型里的 D 是"每秒"量纲，菜单里的 D 是"每帧"量纲，别直接搬数字</li>
+</ul>
+
+<h2 id="s10">10. 新手常犯的错</h2>
+<ol>
+<li><b>同时调俩参数</b> → 测不出因果，铁律①</li>
+<li><b>一画龙就猛加 D</b> → 多数时候是 P 太大，退 P 才是首选</li>
+<li><b>低速参数直接上高速</b> → 每档速度都要重走流程</li>
+<li><b>在亏电电池上调参</b> → 电压掉，PWM-速度对应关系全变，白调</li>
+<li><b>车抖先怪参数</b> → 先确认机械：舵机连杆虚位、轮子旷量、摄像头松动，机械问题参数救不了</li>
+<li><b>只看车跑不跑，不看 DATA 页数字</b> → Err 收敛形态比肉眼更早告诉你问题</li>
+<li><b>调好了不记录</b> → 下次掉电丢参数，原地去世</li>
+</ol>
+
+<h2 id="s11">11. 黑话词典</h2>
+<table>
+<tr><th>词</th><th>意思</th></tr>
+<tr><td>画龙</td><td>直道上左右周期性摆头，P 过大/带宽超限的典型震荡</td></tr>
+<tr><td>推头 / 转向不足</td><td>弯里车往弯外滑，转不过来</td></tr>
+<tr><td>外冲</td><td>弯道离心力+打角不足，车冲出弯道外侧</td></tr>
+<tr><td>超调</td><td>修到中线刹不住，冲过头的部分</td></tr>
+<tr><td>阻尼 ζ</td><td>"刹车力度"。&lt;0.7 震荡，0.7~0.9 最佳，&gt;1 迟钝</td></tr>
+<tr><td>ωn（固有频率）</td><td>"修正速度"。越大修得越快，受延迟限制有上限</td></tr>
+<tr><td>饱和</td><td>舵机/电机打到头了，输出加不上去</td></tr>
+<tr><td>阶跃</td><td>误差瞬间跳一截（比如环岛补线瞬间）</td></tr>
+<tr><td>开环/闭环</td><td>现在电机给 PWM 是开环（不管轮子实际转多快）；上编码器测速闭环后差速才精确</td></tr>
+</table>
+
+<p style="color:var(--muted);margin-top:3em;border-top:1px solid var(--line);padding-top:12px">
+南总专属 · 2026.10 · 配合 WorkBuddy 参数计算器（模型滑块）一起用 · 掉电不丢，手机随查
+</p>
+
+</div>
+</body>
+</html>

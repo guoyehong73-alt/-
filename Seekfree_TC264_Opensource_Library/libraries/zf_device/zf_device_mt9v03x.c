@@ -60,12 +60,14 @@
 #include "zf_device_camera.h"
 #include "zf_device_config.h"
 #include "zf_device_mt9v03x.h"
+#include "string.h"
 
 vuint8  mt9v03x_finish_flag = 0;                            // 一场图像采集完成标志位
 IFX_ALIGN(4) uint8  mt9v03x_image[MT9V03X_H][MT9V03X_W];    // 必须4字节对齐
 
 static  m9v03x_type_enum mt9v03x_type;                      // 定义摄像头类型
 static  uint16    mt9v03x_version = 0x00;                   // 定义摄像头版本号
+static  soft_iic_info_struct mt9v03x_iic_struct;            // SCCB运行时重新配置使用
 
 
 int16   timeout = MT9V03X_INIT_TIMEOUT;                     // 定义超时溢出时长
@@ -381,6 +383,71 @@ uint8 mt9v03x_set_exposure_time (uint16 light)
     {
         return_state = mt9v03x_set_exposure_time_sccb(light);
     }
+    if(return_state == 0)
+    {
+        mt9v03x_set_confing_buffer[MT9V03X_EXP_TIME][1] = (int16)light;
+    }
+    return return_state;
+}
+
+//-------------------------------------------------------------------------------------------------------------------
+// 函数简介     设置摄像头帧率
+// 参数说明     fps             目标帧率
+// 返回参数     uint8           1-失败 0-成功
+// 使用示例     mt9v03x_set_fps(60);                    // 调用该函数前请先初始化摄像头
+// 备注信息     设置成功后同步更新初始化配置缓存
+//-------------------------------------------------------------------------------------------------------------------
+uint8 mt9v03x_set_fps (uint16 fps)
+{
+    uint8 return_state = 0;
+
+    if(MT9V03X_UART == mt9v03x_type)
+    {
+        set_camera_type(CAMERA_GRAYSCALE, mt9v03x_vsync_handler, mt9v03x_dma_handler, mt9v03x_uart_handler);
+
+        uint8  uart_buffer[4];
+        uint16 temp = 0;
+        uint16 timeout_count = 0;
+        uint32 uart_buffer_index = 0;
+
+        uart_buffer[0] = 0xA5;
+        uart_buffer[1] = MT9V03X_FPS;
+        uart_buffer[2] = fps >> 8;
+        uart_buffer[3] = (uint8)fps;
+        uart_write_buffer(MT9V03X_COF_UART, uart_buffer, 4);
+
+        do
+        {
+            if(3 <= fifo_used(&camera_receiver_fifo))
+            {
+                uart_buffer_index = 3;
+                fifo_read_buffer(&camera_receiver_fifo, uart_buffer, &uart_buffer_index, FIFO_READ_AND_CLEAN);
+                temp = uart_buffer[1] << 8 | uart_buffer[2];
+                break;
+            }
+            system_delay_ms(1);
+        }while(MT9V03X_INIT_TIMEOUT > timeout_count ++);
+
+        if((temp != fps) || (MT9V03X_INIT_TIMEOUT <= timeout_count))
+        {
+            return_state = 1;
+        }
+
+        set_camera_type(CAMERA_GRAYSCALE, mt9v03x_vsync_handler, mt9v03x_dma_handler, NULL);
+    }
+    else
+    {
+        int16 config[MT9V03X_CONFIG_FINISH][2];
+
+        memcpy(config, mt9v03x_set_confing_buffer, sizeof(config));
+        config[MT9V03X_FPS][1] = (int16)fps;
+        return_state = mt9v03x_set_config_sccb(&mt9v03x_iic_struct, config);
+    }
+
+    if(return_state == 0)
+    {
+        mt9v03x_set_confing_buffer[MT9V03X_FPS][1] = (int16)fps;
+    }
     return return_state;
 }
 
@@ -452,7 +519,6 @@ uint8 mt9v03x_set_reg (uint8 addr, uint16 data)
 uint8 mt9v03x_init (void)
 {
     uint8 return_state = 0;
-    soft_iic_info_struct mt9v03x_iic_struct;
     do
     {
         system_delay_ms(200);

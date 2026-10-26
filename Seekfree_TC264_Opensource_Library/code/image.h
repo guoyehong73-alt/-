@@ -50,6 +50,7 @@ extern int Boundry_Start_Left,Boundry_Start_Right;
 extern volatile int Island_State;         // 环岛状态
 extern volatile int Ramp_Flag;              // 坡道标志
 extern volatile int Cross_Flag;             // 十字标志
+extern volatile uint8 Straight_Flag;      //直道标志
 extern int Zebra_Flag;                             //斑马线标志
 extern uint16 zebra_run_frame;                     // 帧计数器，可用来计时
 extern int Left_Up_Inflection_Point;                // 左上拐点行号，0=未找到

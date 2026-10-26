@@ -1,0 +1,15 @@
+/*
+ * led.h
+ *
+ *  Created on: 2026Äê9ÔÂ13ÈÕ
+ *      Author: Guoyehong6
+ */
+
+#ifndef CODE_LED_H_
+#define CODE_LED_H_
+#include "zf_common_headfile.h"
+
+void Led_Init();
+void LiuShui();
+
+#endif /* CODE_LED_H_ */

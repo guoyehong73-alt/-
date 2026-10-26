@@ -1,0 +1,25 @@
+/*
+ * control.h
+ *
+ *  Created on: 2026年9月23日
+ *      Author: Guoyehong6
+ */
+
+#ifndef CODE_CONTROL_H_
+#define CODE_CONTROL_H_
+
+#include "zf_common_headfile.h"
+
+#define SERVO_MOTOR_PWM             (ATOM0_CH1_P33_9)                           // 定义主板上舵机对应引脚
+#define SERVO_MOTOR_FREQ            (50 )                                       // 定义主板上舵机频率  请务必注意范围 50-300
+
+#define SERVO_PWMMID    903
+#define SERVO_PWM_MAX   993
+#define SERVO_PWM_MIN   805
+
+
+
+void Servo_Init(void);
+float Err_Sum(void);
+
+#endif /* CODE_CONTROL_H_ */

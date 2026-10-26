@@ -1,0 +1,559 @@
+/*********************************************************************************************************************
+* 文件名称：menu.c
+* 功能说明：简单二级菜单
+* 一级菜单：PD参数、电机PWM、图像显示
+* 二级菜单：P、D、电机PWM
+* 保存说明：不写Flash，掉电后恢复默认值
+* 按键说明：
+*           KEY_1/S1 = P32_4
+*           KEY_2/S2 = P22_0
+*           KEY_3/S3 = P23_1
+*           KEY_4/S4 = P22_2
+********************************************************************************************************************/
+
+#include "menu.h"
+#include "control.h"
+
+// P参数最小值
+#define MENU_KP_MIN              (0.0f)
+
+// P参数最大值
+#define MENU_KP_MAX              (3.0f)
+
+// P参数调整步长
+#define MENU_KP_STEP             (0.05f)
+
+// D参数最小值
+#define MENU_KD_MIN              (0.0f)
+
+// D参数最大值
+#define MENU_KD_MAX              (4.0f)
+
+// D参数调整步长
+#define MENU_KD_STEP             (0.05f)
+
+// 电机PWM最小值
+#define MENU_MOTOR_MIN           (0)
+
+// 电机PWM最大值
+#define MENU_MOTOR_MAX           (4000)
+
+// 电机PWM调整步长
+#define MENU_MOTOR_STEP          (100)
+
+// 误差突变限制，防止D项把舵机甩到底
+#define MENU_D_LIMIT             (8.0f)
+
+// 菜单页面编号
+typedef enum
+{
+    // 图像页面
+    MENU_PAGE_IMAGE = 0,
+
+    // 一级主菜单
+    MENU_PAGE_MAIN,
+
+    // PD参数菜单
+    MENU_PAGE_PD,
+
+    // 电机PWM菜单
+    MENU_PAGE_MOTOR,
+} menu_page_enum;
+
+// 一级菜单选项编号
+typedef enum
+{
+    // PD参数
+    MENU_MAIN_PD = 0,
+
+    // 电机PWM
+    MENU_MAIN_MOTOR,
+
+    // 图像显示
+    MENU_MAIN_IMAGE,
+
+    // 一级菜单项目数量
+    MENU_MAIN_COUNT,
+} menu_main_item_enum;
+
+// PD页面选择的参数
+typedef enum
+{
+    // 选择P
+    MENU_PD_P = 0,
+
+    // 选择D
+    MENU_PD_D,
+} menu_pd_item_enum;
+
+// PD控制器的P参数，运行在RAM中
+static volatile float menu_kp = 1.4f;
+
+// PD控制器的D参数，运行在RAM中
+static volatile float menu_kd = 2.80f;
+
+// 左右电机基础PWM，运行在RAM中
+static volatile int menu_motor_pwm = 2000;
+
+// 当前菜单页面
+static uint8 menu_page = MENU_PAGE_IMAGE;
+
+// 菜单重绘标志
+static uint8 menu_dirty = 1;
+
+// 一级菜单当前选项
+static uint8 menu_main_item = MENU_MAIN_PD;
+
+// PD页面当前选择的参数
+static uint8 menu_pd_item = MENU_PD_P;
+
+// PD复位标志
+static uint8 menu_pd_reset = 1;
+
+/*********************************************************************************************************************
+* 函数名称：Menu_KeyEvent
+* 功能说明：读取按键事件
+* 参数说明：key 按键编号
+* 返回说明：1表示有按键事件，0表示无按键事件
+********************************************************************************************************************/
+static uint8 Menu_KeyEvent(key_index_enum key)
+{
+    // 当前按键状态
+    key_state_enum state = key_get_state(key);
+
+    // 短按和长按都当作一次有效操作
+    if((state == KEY_SHORT_PRESS) || (state == KEY_LONG_PRESS))
+    {
+        // 清除按键状态
+        key_clear_state(key);
+        return 1;
+    }
+
+    return 0;
+}
+
+/*********************************************************************************************************************
+* 函数名称：Menu_AdjustPd
+* 功能说明：调整P或D
+* 参数说明：direction 1表示增大，-1表示减小
+* 返回说明：无
+********************************************************************************************************************/
+static void Menu_AdjustPd(int direction)
+{
+    // 当前选择P
+    if(menu_pd_item == MENU_PD_P)
+    {
+        menu_kp += direction * MENU_KP_STEP;
+
+        if(menu_kp < MENU_KP_MIN)
+            menu_kp = MENU_KP_MIN;
+        if(menu_kp > MENU_KP_MAX)
+            menu_kp = MENU_KP_MAX;
+    }
+    // 当前选择D
+    else
+    {
+        menu_kd += direction * MENU_KD_STEP;
+
+        if(menu_kd < MENU_KD_MIN)
+            menu_kd = MENU_KD_MIN;
+        if(menu_kd > MENU_KD_MAX)
+            menu_kd = MENU_KD_MAX;
+    }
+
+    // 需要重绘菜单
+    menu_dirty = 1;
+}
+
+/*********************************************************************************************************************
+* 函数名称：Menu_AdjustMotor
+* 功能说明：调整电机PWM
+* 参数说明：direction 1表示增大，-1表示减小
+* 返回说明：无
+********************************************************************************************************************/
+static void Menu_AdjustMotor(int direction)
+{
+    menu_motor_pwm += direction * MENU_MOTOR_STEP;
+
+    // 电机PWM下限
+    if(menu_motor_pwm < MENU_MOTOR_MIN)
+        menu_motor_pwm = MENU_MOTOR_MIN;
+
+    // 电机PWM上限
+    if(menu_motor_pwm > MENU_MOTOR_MAX)
+        menu_motor_pwm = MENU_MOTOR_MAX;
+
+    // 需要重绘菜单
+    menu_dirty = 1;
+}
+
+/*********************************************************************************************************************
+* 函数名称：Menu_DrawMain
+* 功能说明：绘制一级菜单
+* 参数说明：无
+* 返回说明：无
+********************************************************************************************************************/
+static void Menu_DrawMain(void)
+{
+    // 清屏
+    tft180_full(RGB565_BLACK);
+    tft180_set_font(TFT180_8X16_FONT);
+
+    // 标题
+    tft180_set_color(RGB565_CYAN, RGB565_BLACK);
+    tft180_show_string(0, 0, "MAIN MENU");
+
+    // PD参数选项
+    tft180_set_color((menu_main_item == MENU_MAIN_PD) ? RGB565_YELLOW : RGB565_WHITE,
+                     RGB565_BLACK);
+    tft180_show_string(0, 28, "1. PD SET");
+
+    // 电机PWM选项
+    tft180_set_color((menu_main_item == MENU_MAIN_MOTOR) ? RGB565_YELLOW : RGB565_WHITE,
+                     RGB565_BLACK);
+    tft180_show_string(0, 52, "2. MOTOR PWM");
+
+    // 图像显示选项
+    tft180_set_color((menu_main_item == MENU_MAIN_IMAGE) ? RGB565_YELLOW : RGB565_WHITE,
+                     RGB565_BLACK);
+    tft180_show_string(0, 76, "3. IMAGE");
+
+    // 按键提示
+    tft180_set_font(TFT180_6X8_FONT);
+    tft180_set_color(RGB565_WHITE, RGB565_BLACK);
+    tft180_show_string(0, 108, "S1:ENTER S4:IMAGE");
+}
+
+/*********************************************************************************************************************
+* 函数名称：Menu_DrawPd
+* 功能说明：绘制PD参数菜单
+* 参数说明：无
+* 返回说明：无
+********************************************************************************************************************/
+static void Menu_DrawPd(void)
+{
+    // 清屏
+    tft180_full(RGB565_BLACK);
+    tft180_set_font(TFT180_8X16_FONT);
+
+    // 标题
+    tft180_set_color(RGB565_CYAN, RGB565_BLACK);
+    tft180_show_string(0, 0, "PD SET");
+
+    // P参数
+    tft180_set_color((menu_pd_item == MENU_PD_P) ? RGB565_YELLOW : RGB565_WHITE,
+                     RGB565_BLACK);
+    tft180_show_string(0, 32, "P:");
+    tft180_show_float(32, 32, menu_kp, 4, 2);
+
+    // D参数
+    tft180_set_color((menu_pd_item == MENU_PD_D) ? RGB565_YELLOW : RGB565_WHITE,
+                     RGB565_BLACK);
+    tft180_show_string(0, 60, "D:");
+    tft180_show_float(32, 60, menu_kd, 4, 2);
+
+    // 按键提示
+    tft180_set_font(TFT180_6X8_FONT);
+    tft180_set_color(RGB565_WHITE, RGB565_BLACK);
+    tft180_show_string(0, 104, "S1:P/D S2- S3+");
+    tft180_show_string(0, 116, "S4:BACK");
+}
+
+/*********************************************************************************************************************
+* 函数名称：Menu_DrawMotor
+* 功能说明：绘制电机PWM菜单
+* 参数说明：无
+* 返回说明：无
+********************************************************************************************************************/
+static void Menu_DrawMotor(void)
+{
+    // 清屏
+    tft180_full(RGB565_BLACK);
+    tft180_set_font(TFT180_8X16_FONT);
+
+    // 标题
+    tft180_set_color(RGB565_CYAN, RGB565_BLACK);
+    tft180_show_string(0, 0, "MOTOR PWM");
+
+    // PWM数值
+    tft180_set_color(RGB565_YELLOW, RGB565_BLACK);
+    tft180_show_string(0, 40, "PWM:");
+    tft180_show_int(40, 40, menu_motor_pwm, 4);
+
+    // 按键提示
+    tft180_set_font(TFT180_6X8_FONT);
+    tft180_set_color(RGB565_WHITE, RGB565_BLACK);
+    tft180_show_string(0, 108, "S2:- S3:+ S4:BACK");
+}
+
+/*********************************************************************************************************************
+* 函数名称：Menu_Draw
+* 功能说明：根据menu_page绘制菜单
+* 参数说明：无
+* 返回说明：无
+********************************************************************************************************************/
+static void Menu_Draw(void)
+{
+    // 一级菜单
+    if(menu_page == MENU_PAGE_MAIN)
+        Menu_DrawMain();
+
+    // PD菜单
+    else if(menu_page == MENU_PAGE_PD)
+        Menu_DrawPd();
+
+    // 电机PWM菜单
+    else if(menu_page == MENU_PAGE_MOTOR)
+        Menu_DrawMotor();
+}
+
+/*********************************************************************************************************************
+* 函数名称：Menu_Init
+* 功能说明：初始化菜单
+* 参数说明：无
+* 返回说明：无
+********************************************************************************************************************/
+void Menu_Init(void)
+{
+    // 初始化按键，10表示扫描周期约10ms
+    key_init(10);
+
+    // 清除按键状态
+    key_clear_all_state();
+
+    // 默认显示图像页面
+    menu_page = MENU_PAGE_IMAGE;
+    menu_dirty = 1;
+    menu_main_item = MENU_MAIN_PD;
+    menu_pd_item = MENU_PD_P;
+    menu_pd_reset = 1;
+
+    // 设置默认字体和颜色
+    tft180_set_font(TFT180_8X16_FONT);
+    tft180_set_color(RGB565_WHITE, RGB565_BLACK);
+}
+
+/*********************************************************************************************************************
+* 函数名称：Menu_Update
+* 功能说明：扫描按键并处理菜单
+* 参数说明：无
+* 返回说明：无
+********************************************************************************************************************/
+void Menu_Update(void)
+{
+    // 扫描按键
+    key_scanner();
+
+    // 图像页面：S1进入菜单
+    if(menu_page == MENU_PAGE_IMAGE)
+    {
+        if(Menu_KeyEvent(KEY_1))
+        {
+            menu_page = MENU_PAGE_MAIN;
+            menu_dirty = 1;
+        }
+    }
+    // 一级菜单
+    else if(menu_page == MENU_PAGE_MAIN)
+    {
+        // S2向上
+        if(Menu_KeyEvent(KEY_2))
+        {
+            if(menu_main_item == 0)
+                menu_main_item = MENU_MAIN_COUNT - 1;
+            else
+                menu_main_item--;
+            menu_dirty = 1;
+        }
+
+        // S3向下
+        if(Menu_KeyEvent(KEY_3))
+        {
+            menu_main_item++;
+            if(menu_main_item >= MENU_MAIN_COUNT)
+                menu_main_item = 0;
+            menu_dirty = 1;
+        }
+
+        // S1进入
+        if(Menu_KeyEvent(KEY_1))
+        {
+            if(menu_main_item == MENU_MAIN_PD)
+                menu_page = MENU_PAGE_PD;
+            else if(menu_main_item == MENU_MAIN_MOTOR)
+                menu_page = MENU_PAGE_MOTOR;
+            else
+            {
+                menu_page = MENU_PAGE_IMAGE;
+                menu_pd_reset = 1;
+            }
+            menu_dirty = 1;
+        }
+
+        // S4返回图像
+        if(Menu_KeyEvent(KEY_4))
+        {
+            menu_page = MENU_PAGE_IMAGE;
+            menu_pd_reset = 1;
+            menu_dirty = 1;
+        }
+    }
+    // PD页面
+    else if(menu_page == MENU_PAGE_PD)
+    {
+        // S1切换P和D
+        if(Menu_KeyEvent(KEY_1))
+        {
+            menu_pd_item = (menu_pd_item == MENU_PD_P) ?
+                           MENU_PD_D : MENU_PD_P;
+            menu_dirty = 1;
+        }
+
+        // S2减小
+        if(Menu_KeyEvent(KEY_2))
+            Menu_AdjustPd(-1);
+
+        // S3增大
+        if(Menu_KeyEvent(KEY_3))
+            Menu_AdjustPd(1);
+
+        // S4返回
+        if(Menu_KeyEvent(KEY_4))
+        {
+            menu_page = MENU_PAGE_MAIN;
+            menu_dirty = 1;
+        }
+    }
+    // 电机PWM页面
+    else if(menu_page == MENU_PAGE_MOTOR)
+    {
+        // S2减小
+        if(Menu_KeyEvent(KEY_2))
+            Menu_AdjustMotor(-1);
+
+        // S3增大
+        if(Menu_KeyEvent(KEY_3))
+            Menu_AdjustMotor(1);
+
+        // S1或S4返回
+        if(Menu_KeyEvent(KEY_1) || Menu_KeyEvent(KEY_4))
+        {
+            menu_page = MENU_PAGE_MAIN;
+            menu_dirty = 1;
+        }
+    }
+
+    // 菜单有变化时重绘
+    if((menu_page != MENU_PAGE_IMAGE) && menu_dirty)
+    {
+        menu_dirty = 0;
+        Menu_Draw();
+    }
+
+    // 菜单页面按约10ms扫描按键
+    if(menu_page != MENU_PAGE_IMAGE)
+        system_delay_ms(10);
+}
+
+/*********************************************************************************************************************
+* 函数名称：Menu_IsMenuPage
+* 功能说明：判断当前是否在菜单页面
+* 参数说明：无
+* 返回说明：1表示菜单页面，0表示图像页面
+********************************************************************************************************************/
+uint8 Menu_IsMenuPage(void)
+{
+    return menu_page != MENU_PAGE_IMAGE;
+}
+
+/*********************************************************************************************************************
+* 函数名称：Menu_DrawImageOverlay
+* 功能说明：在图像页面底部显示当前参数
+* 参数说明：无
+* 返回说明：无
+********************************************************************************************************************/
+void Menu_DrawImageOverlay(void)
+{
+    // 显示P
+    tft180_set_font(TFT180_6X8_FONT);
+    tft180_set_color(RGB565_CYAN, RGB565_BLACK);
+    tft180_show_string(0, 104, "P:");
+    tft180_show_float(10, 104, menu_kp, 4, 2);
+
+    // 显示D
+    tft180_show_string(64, 104, "D:");
+    tft180_show_float(74, 104, menu_kd, 4, 2);
+
+    // 显示电机PWM和菜单入口
+    tft180_set_color(RGB565_WHITE, RGB565_BLACK);
+    tft180_show_string(0, 116, "PWM:");
+    tft180_show_int(24, 116, menu_motor_pwm, 4);
+    tft180_show_string(56, 116, "S1:MENU");
+}
+
+/*********************************************************************************************************************
+* 函数名称：Menu_PD
+* 功能说明：使用菜单中的P、D计算舵机PD输出
+* 参数说明：err 中线误差
+* 返回说明：舵机PWM
+********************************************************************************************************************/
+int Menu_PD(float err)
+{
+    // 上一次误差
+    static float last_err = 0.0f;
+
+    // 上一次输出
+    static int last_out = SERVO_PWMMID;
+
+    // 误差变化量
+    float delta;
+
+    // PD输出
+    float out;
+
+    // 从菜单返回图像页面后复位PD
+    if(menu_pd_reset)
+    {
+        last_err = err;
+        menu_pd_reset = 0;
+    }
+
+    // 误差基本不变时保持输出
+    delta = err - last_err;
+    if((delta > -0.01f) && (delta < 0.01f))
+        return last_out;
+
+    // 限制D项输入突变
+    if(delta > MENU_D_LIMIT)
+        delta = MENU_D_LIMIT;
+    else if(delta < -MENU_D_LIMIT)
+        delta = -MENU_D_LIMIT;
+
+    // PD公式
+    out = menu_kp * err + menu_kd * delta + SERVO_PWMMID;
+
+    // 舵机上限
+    if(out > SERVO_PWM_MAX)
+        out = SERVO_PWM_MAX;
+
+    // 舵机下限
+    else if(out < SERVO_PWM_MIN)
+        out = SERVO_PWM_MIN;
+
+    // 保存本次误差和输出
+    last_err = err;
+    last_out = (int)out;
+
+    return last_out;
+}
+
+/*********************************************************************************************************************
+* 函数名称：Menu_GetMotorPwm
+* 功能说明：返回电机基础PWM
+* 参数说明：无
+* 返回说明：左右电机基础PWM
+********************************************************************************************************************/
+int Menu_GetMotorPwm(void)
+{
+    return menu_motor_pwm;
+}

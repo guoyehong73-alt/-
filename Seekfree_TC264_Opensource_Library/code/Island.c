@@ -250,6 +250,7 @@ int Continuity_Change_Right(int start,int end)
 extern volatile int Left_Island_Flag=0;
 extern volatile int Right_Island_Flag=0;
 static float Ring_Start_Yaw = 0;
+#define ISLAND_ENTRY_PATCH_YAW      (45.0f)
 
 void Island_Reset(void)
 {
@@ -257,6 +258,7 @@ void Island_Reset(void)
     Left_Island_Flag = 0;
     Right_Island_Flag = 0;
     Ring_Start_Yaw = 0;
+    Yaw_Total = 0;
 }
 
 void Island_Detect(void)
@@ -272,13 +274,79 @@ void Island_Detect(void)
     static int left_up_guai[2]={0};
     static int right_up_guai[2]={0};
 
+    /* 状态保护计时不受十字/坡道互斥影响，避免环岛卡死 */
+    {
+        static uint16 state3_frame = 0;
+        static uint16 state4_frame = 0;
+        static uint16 state5_frame = 0;
+        static uint16 state6_frame = 0;
+
+        if(Island_State == 3)
+        {
+            state3_frame++;
+            state4_frame = 0;
+            state5_frame = 0;
+            state6_frame = 0;
+            if(state3_frame > 150)
+            {
+                Island_State = 4;
+                state3_frame = 0;
+            }
+        }
+        else if(Island_State == 4)
+        {
+            state4_frame++;
+            state3_frame = 0;
+            state5_frame = 0;
+            state6_frame = 0;
+            if(state4_frame > 150)
+            {
+                Island_State = 5;
+                state4_frame = 0;
+            }
+        }
+        else if(Island_State == 5)
+        {
+            state5_frame++;
+            state3_frame = 0;
+            state4_frame = 0;
+            state6_frame = 0;
+            if(state5_frame > 60)
+            {
+                Island_State = 6;
+                state5_frame = 0;
+            }
+        }
+        else if(Island_State == 6)
+        {
+            state6_frame++;
+            state3_frame = 0;
+            state4_frame = 0;
+            state5_frame = 0;
+            if(state6_frame > 50)
+            {
+                Island_State = 0;
+                Left_Island_Flag = 0;
+                Right_Island_Flag = 0;
+                state6_frame = 0;
+            }
+        }
+        else
+        {
+            state3_frame = 0;
+            state4_frame = 0;
+            state5_frame = 0;
+            state6_frame = 0;
+        }
+    }
+
 //    if(race_started == 0)
 //    {
 //        Island_Reset();
 //        return;
 //    }
 
-
+/* 左R60，右R50 */
     if(Cross_Flag==0&&Ramp_Flag==0)
     {
         monotonicity_change_right_flag=Monotonicity_Change_Right(MT9V03X_H-1-10,10);
@@ -314,10 +382,10 @@ void Island_Detect(void)
                      continuity_change_right_flag!=0&&
                      Right_Lost_Time>=10&&
                      Right_Lost_Time<=100&&
-                     Left_Lost_Time<=25&&
+                     Left_Lost_Time<=30&&
                      Search_Stop_Line>=MT9V03X_H*0.9&&
                      Boundry_Start_Left>=MT9V03X_H-30&&Boundry_Start_Right>=MT9V03X_H-30&&
-                     Both_Lost_Time<=25)
+                     Both_Lost_Time<=30)
              {
                   right_down_guai[0]=Find_Right_Down_Inflection_Point(MT9V03X_H-1,20);
                   if(right_down_guai[0]>30)
@@ -335,36 +403,37 @@ void Island_Detect(void)
 
         if(Left_Island_Flag==1&&Island_State==1)        //第一次补线
         {
-            monotonicity_change_line[0]=Monotonicity_Change_Left(30,5);
+            monotonicity_change_line[0]=Monotonicity_Change_Left(50,5);
             monotonicity_change_line[1]=Left_Line[monotonicity_change_line[0]];
             Left_Add_Line((int)(monotonicity_change_line[1]*0.15),MT9V03X_H-1,monotonicity_change_line[1],monotonicity_change_line[0]);
 
-            if((Island_State==1)&&(Left_Lost_Time>49))
+            if((Island_State==1)&&(Left_Lost_Time>45))
             {
                 Island_State=2;
             }
         }
-        else if(Right_Island_Flag==1&&Island_State==1)  //右环第一次补线
+        else if(Right_Island_Flag==1&&Island_State==1)  //右环第一次补线  /*R50--40*/
         {
-            monotonicity_change_line[0]=Monotonicity_Change_Right(30,5);
+            monotonicity_change_line[0]=Monotonicity_Change_Right(50,5);
             monotonicity_change_line[1]=Right_Line[monotonicity_change_line[0]];
-            Right_Add_Line((int)(MT9V03X_W-1-(MT9V03X_W-1-monotonicity_change_line[1])*0.15),MT9V03X_H-1,monotonicity_change_line[1],monotonicity_change_line[0]);
+            Right_Add_Line((int)(MT9V03X_W-1-(monotonicity_change_line[1]*0.15)),MT9V03X_H-1,monotonicity_change_line[1],monotonicity_change_line[0]);
 
-            if((Island_State==1)&&(Right_Lost_Time>43))
+            if((Island_State==1)&&(Right_Lost_Time>40))
             {
                 Island_State=2;
             }
         }
         else if(Left_Island_Flag==1&&Island_State==2)        //第二次补线
         {
-            monotonicity_change_line[0]=Monotonicity_Change_Left(MT9V03X_H-5,30);
+            monotonicity_change_line[0]=Monotonicity_Change_Left(MT9V03X_H-55,20);
             monotonicity_change_line[1]=Left_Line[monotonicity_change_line[0]];
             Left_Add_Line((int)(monotonicity_change_line[1]*0.1),MT9V03X_H-1,monotonicity_change_line[1],monotonicity_change_line[0]);
-            if(Island_State==2&&(Left_Lost_Time<=38))
+            if(Island_State==2&&(Left_Lost_Time<=32))
             {
+                Yaw_Total = 0;
+                Ring_Start_Yaw = 0;
                 Island_State=3;
                 Left_Island_Flag=1;
-                Ring_Start_Yaw = Yaw_Total;
             }
         }
         else if(Right_Island_Flag==1&&Island_State==2)        //右环第二次补线
@@ -372,94 +441,77 @@ void Island_Detect(void)
             monotonicity_change_line[0]=Monotonicity_Change_Right(MT9V03X_H-5,30);
             monotonicity_change_line[1]=Right_Line[monotonicity_change_line[0]];
             Right_Add_Line((int)(MT9V03X_W-1-(MT9V03X_W-1-monotonicity_change_line[1])*0.1),MT9V03X_H-1,monotonicity_change_line[1],monotonicity_change_line[0]);
-            if(Island_State==2&&(Right_Lost_Time<=44))
+            if(Island_State==2&&(Right_Lost_Time<=20))
             {
+                Yaw_Total = 0;
+                Ring_Start_Yaw = 0;
                 Island_State=3;
                 Right_Island_Flag=1;
-                Ring_Start_Yaw = Yaw_Total;
             }
         }
         else if(Island_State==3)        //准备入环+入环
         {
-            XunXian();
-            if(Right_Island_Flag==1)//右环
+            float ring_yaw = fabs(Yaw_Total - Ring_Start_Yaw);
+
+            if(ring_yaw >= 50.0f)
             {
-                //右环：按左环镜像补左边界进环
-                left_down_guai[0]=Find_Left_Down_Inflection_Point(60, 5);
-                right_up_guai[0]=Find_Right_Up_Inflection_Point(MT9V03X_H-5, 5);
-                right_up_guai[1]=Right_Line[right_up_guai[0]];
-                Left_Add_Line((int)Left_Line[Boundry_Start_Left],Boundry_Start_Left, right_up_guai[1], right_up_guai[0]);
-//                if(Island_State==3 && count>60 && Left_Lost_Time>80 && Right_Lost_Time>75 && left_down_guai[0]!=0 )
-//                {
-//                    count=0;
-//                    Island_State=4;
-//                }
-                if(fabs(Yaw_Total - Ring_Start_Yaw) >= 290.0f)
-                {
-                    Island_State = 4;
-                }
+                Island_State = 4;
             }
-            else//左环
+            else if(ring_yaw < ISLAND_ENTRY_PATCH_YAW)
             {
-                right_down_guai[0]=Find_Right_Down_Inflection_Point(60, 5);
-                left_up_guai[0]=Find_Left_Up_Inflection_Point(MT9V03X_H-5, 5);
-                left_up_guai[1]=Left_Line[left_up_guai[0]];
-                Right_Add_Line((int)Right_Line[Boundry_Start_Right],Boundry_Start_Right, left_up_guai[1], left_up_guai[0]);
-//                if(Island_State==3 && count>60 && Right_Lost_Time>80 && Left_Lost_Time>75 && right_down_guai[0]!=0 )
-//                {
-//                    count=0;
-//                    Island_State=4;
-//                }
-                if(fabs(Yaw_Total - Ring_Start_Yaw) >= 290.0f)
+                /* 入环前段保留补线，超过设定角度后恢复自由巡线 */
+                if(Right_Island_Flag==1)
                 {
-                    Island_State = 4;
+                    right_up_guai[0]=Find_Right_Up_Inflection_Point(MT9V03X_H-5, 5);
+                    right_up_guai[1]=Right_Line[right_up_guai[0]];
+                    Left_Add_Line((int)Left_Line[Boundry_Start_Left],Boundry_Start_Left,
+                                  right_up_guai[1],right_up_guai[0]);
+                }
+                else
+                {
+                    left_up_guai[0]=Find_Left_Up_Inflection_Point(MT9V03X_H-5, 5);
+                    left_up_guai[1]=Left_Line[left_up_guai[0]];
+                    Right_Add_Line((int)Right_Line[Boundry_Start_Right],Boundry_Start_Right,
+                                   left_up_guai[1],left_up_guai[0]);
                 }
             }
         }
-        else if(Island_State==4)        //出环
+        else if(Island_State==4)        //环岛内部自由巡线
         {
-            XunXian();
-            if(Right_Island_Flag==1)
+            if(fabs(Yaw_Total - Ring_Start_Yaw) >= 230.0f)
             {
-                //右环：按左环镜像延长右边界出环
+                Island_State = 5;
+            }
+        }
+        else if(Island_State==5)       //固定舵机角出环
+        {
+            if(fabs(Yaw_Total - Ring_Start_Yaw) >= 320.0f)
+            {
+                Island_State = 6;
+            }
+        }
+        else if(Island_State==6)       //出环恢复边界巡线
+        {
+            if(Right_Island_Flag==1)//右环
+            {
                 right_up_guai[0]=Find_Right_Up_Inflection_Point(MT9V03X_H-5, 5);
                 Lengthen_Right_Boundry(right_up_guai[0],MT9V03X_H-1);
-                if(Island_State==4 && Search_Stop_Line>105 && Search_Stop_Line<119 && right_up_guai[0]==0)
+                if(Island_State==6 && Search_Stop_Line>105 && Search_Stop_Line<119 && right_up_guai[0]==0)
                 {
                     Island_State=0;
                     Right_Island_Flag=0;
                 }
             }
-            else
+            else//左环
             {
                 left_up_guai[0]=Find_Left_Up_Inflection_Point(MT9V03X_H-5, 5);
                 Lengthen_Left_Boundry(left_up_guai[0],MT9V03X_H-1);
-                if(Island_State==4 && Search_Stop_Line>105 && Search_Stop_Line<119 && left_up_guai[0]==0)
+                if(Island_State==6 && Search_Stop_Line>105 && Search_Stop_Line<119 && left_up_guai[0]==0)
                 {
                     Island_State=0;
                     Left_Island_Flag=0;
                 }
             }
         }
-//        /* ---- 状态3卡死保护 ---- */
-//        {
-//            static uint16 state3_frame = 0;
-//
-//            if(Island_State == 3)
-//            {
-//                state3_frame++;
-//                if(state3_frame > 94)
-//                {
-//                    Island_State = 0;
-//                    Left_Island_Flag = 0;       /* 一起清掉，不然以后检不到新的环岛 */
-//                    Right_Island_Flag = 0;
-//                    state3_frame = 0;
-//                }
-//            }
-//            else
-//            {
-//                state3_frame = 0;               /* 只要不是状态3，就重新计时 */
-//            }
-//        }
     }
 }

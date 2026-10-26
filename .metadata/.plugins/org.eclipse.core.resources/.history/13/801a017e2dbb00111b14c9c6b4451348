@@ -1,0 +1,15 @@
+/*
+ * control.h
+ *
+ *  Created on: 2026Äê9ÔÂ23ÈÕ
+ *      Author: Guoyehong6
+ */
+
+#ifndef CODE_CONTROL_H_
+#define CODE_CONTROL_H_
+
+#include "zf_common_headfile.h"
+
+float Err_Sum(void);
+
+#endif /* CODE_CONTROL_H_ */

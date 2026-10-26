@@ -1,0 +1,54 @@
+/*
+ * Motor.c
+ *
+ *  Created on: 2026年9月26日
+ *      Author: Guoyehong6
+ */
+#include "Motor.h"
+
+void Motor_Init()
+{
+    gpio_init(MotorL_turn, GPO, 1, GPO_PUSH_PULL);
+    pwm_init(MotorL_pwm, 5000, 0);
+    gpio_init(MotorR_turn, GPO, 1, GPO_PUSH_PULL);
+    pwm_init(MotorR_pwm, 5000, 0);
+}
+
+void MotorL_Set_Speed(int pwm)
+{
+    if(pwm>=SPEED_MAX)        //限幅处理
+       pwm=SPEED_MAX;
+    else if(pwm<=SPEED_MIN)
+       pwm=SPEED_MIN;
+
+    if(pwm>=0)
+    {
+        gpio_set_level(MotorL_turn, 1);
+        pwm_set_duty(MotorL_pwm, pwm);
+    }
+    else
+    {
+        gpio_set_level(MotorL_turn, 0);
+        pwm_set_duty(MotorL_pwm, -pwm);
+    }
+}
+
+void MotorR_Set_Speed(int pwm)
+{
+    if(pwm>=SPEED_MAX)        //限幅处理
+            pwm=SPEED_MAX;
+    else if(pwm<=SPEED_MIN)
+            pwm=SPEED_MIN;
+
+    if(pwm>=0)
+    {
+        gpio_set_level(MotorR_turn, 1);
+        pwm_set_duty(MotorR_pwm, pwm);
+    }
+    else
+    {
+        gpio_set_level(MotorR_turn, 0);
+        pwm_set_duty(MotorR_pwm, -pwm);
+    }
+}
+

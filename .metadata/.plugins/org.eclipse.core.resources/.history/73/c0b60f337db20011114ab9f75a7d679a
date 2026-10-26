@@ -1,0 +1,15 @@
+/*
+ * image.h
+ *
+ *  Created on: 2026Äê9ÔÂ16ÈÕ
+ *      Author: Guoyehong6
+ */
+
+#ifndef CODE_IMAGE_H_
+#define CODE_IMAGE_H_
+
+#include "zf_common_headfile.h"
+
+extern uint8 base_image[MT9V03X_H][MT9V03X_W];
+
+#endif /* CODE_IMAGE_H_ */

@@ -16,6 +16,7 @@ extern volatile float Yaw_Total;
 extern volatile float Gyro_Z_Dps;
 
 void Gyro_Init(void);
+void Gyro_RecalibrateBias(void);
 void Gyro_Update_5ms(void);
 
 #endif /* CODE_PID_H_ */
